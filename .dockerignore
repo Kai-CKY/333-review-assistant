@@ -1,0 +1,9 @@
+.git
+.env
+.env.local
+.data
+runtime-data
+node_modules
+coverage
+docs
+scripts

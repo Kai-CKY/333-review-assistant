@@ -25,6 +25,10 @@ try {
   console.warn('Feedback-job startup reconciliation is unavailable:', error.code ?? error.message);
 }
 const port = Number(process.env.PORT ?? 3333);
+// Default to loopback so an unconfigured cloud deployment cannot expose the
+// unauthenticated API to the public internet. Containers set HOST=0.0.0.0 and
+// are published back to the host's loopback interface in compose.yaml.
+const host = process.env.HOST ?? '127.0.0.1';
 let feishuBotStatus = { status: 'not_started' };
 
 const mimeTypes = {
@@ -137,8 +141,8 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-server.listen(port, () => {
-  console.log(`333 review assistant is running at http://localhost:${server.address().port}`);
+server.listen(port, host, () => {
+  console.log(`333 review assistant is running at http://localhost:${server.address().port} (bound to ${host})`);
   if (startupFeedbackRecovery.interruptedJobIds.length) {
     console.warn(`${startupFeedbackRecovery.interruptedJobIds.length} interrupted feedback job(s) were marked failed safely.`);
   }
