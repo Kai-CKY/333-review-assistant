@@ -1,0 +1,9 @@
+{
+  "name": "333 复习助手",
+  "short_name": "333复习",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f3ec",
+  "theme_color": "#f6f3ec"
+}
+

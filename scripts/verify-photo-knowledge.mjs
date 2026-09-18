@@ -1,0 +1,22 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { LocalRepository } from '../apps/api/src/repository.js';
+import { ArkFeedbackProvider } from '../apps/api/src/ark/feedback.js';
+import { PhotoKnowledgeModel, ArkKnowledgeSearch } from '../apps/api/src/knowledge/providers.js';
+import { PhotoKnowledgeService, draftText } from '../apps/api/src/knowledge/service.js';
+import { conversationScope } from '../apps/api/src/agent/memory.js';
+
+const directory = path.resolve(process.env.PHOTO_TEST_OUTPUT_DIR || '.data/knowledge-test');
+await mkdir(directory, { recursive: true });
+const repository = new LocalRepository(path.join(directory, 'live-pipeline.json'));
+const provider = new ArkFeedbackProvider({ timeoutMs: 60000 });
+const service = new PhotoKnowledgeService({ repository, model: new PhotoKnowledgeModel(provider), search: new ArkKnowledgeSearch(), approverId: 'test-user' });
+const scope = conversationScope({ appId: 'isolated-live-test', chatType: 'group', chatId: 'test-only' });
+const files = process.argv.slice(2);
+if (!files.length) throw new Error('Supply image paths; this script calls paid APIs but does not send Feishu messages.');
+const images = await Promise.all(files.map(async file => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${(await readFile(file)).toString('base64')}` } })));
+const at = Date.now();
+const draft = await service.process(scope, { messageId: `live-${at}`, senderId: 'test-user' }, images);
+await writeFile(path.join(directory, 'latest-draft.md'), draftText(draft));
+await writeFile(path.join(directory, 'latest-draft.json'), JSON.stringify(draft, null, 2));
+console.log(JSON.stringify({ id: draft.id, status: draft.status, elapsedMs: Date.now() - at, reads: draft.reads.length, items: draft.versions.at(-1)?.content.items.length, searchError: draft.versions.at(-1)?.searchError, searchCalls: draft.versions.at(-1)?.verification.calls?.length, verified: draft.versions.at(-1)?.verification.checks.filter(c => c.status !== 'unresolved').length, error: draft.error, published: false }));

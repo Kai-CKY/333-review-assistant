@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "id": "K11",
+      "status": "supported",
+      "text": "新的高中生物学课程包括必修、选择性必修、和选修3部分内容",
+      "reason": "根据《普通高中生物学课程标准（2017年版2020年修订）》（中华人民共和国教育部制定，人民教育出版社出版）的课程结构设置，高中生物学课程内容明确分为必修课程、选择性必修课程、选修课程三部分，该表述与官方课标内容一致。",
+      "citations": [
+        "https://huiwen.hgnu.edu.cn/mspace/searchDetailLocal/m674417b166abf4c7a757791427706c1c"
+      ]
+    },
+    {
+      "id": "K13",
+      "status": "supported",
+      "text": "课程标准是教材编写、教学、评估和考试命题的依据，是国家管理和评价基础教育课程的基础",
+      "reason": "课程标准是国家基础教育课程的基本纲领性文件，官方资料明确其为教材编写、教学、评估和考试命题的依据，同时是国家管理和评价基础教育课程的基础，该表述符合课程标准的法定定位与作用。",
+      "citations": [
+        "https://edu.wanfangdata.com.cn/Subject/Detail/c8b211f0-8fce-4d7e-ae1c-99dec014e20d",
+        "https://zy.gdedu.gov.cn/studio/index.php?id=63890&r=studio%2Fpost%2Fview&sid=300208"
+      ]
+    },
+    {
+      "id": "K20",
+      "status": "supported",
+      "text": "《普通高中生物学课程标准（2017版）》主要框架包括：一、课程性质与基本理念；二、学科核心素养与课程目标；三、课程结构；四、课程内容；五、学业质量；六、实施建议",
+      "reason": "《普通高中生物学课程标准（2017年版2020年修订）》（2017版的官方修订版本）的主体框架由六大模块构成，分别为课程性质与基本理念、学科核心素养与课程目标、课程结构、课程内容、学业质量、实施建议，2017版原版核心框架与该表述一致。",
+      "citations": [
+        "https://huiwen.hgnu.edu.cn/mspace/searchDetailLocal/m674417b166abf4c7a757791427706c1c",
+        "https://max.book118.com/html/2021/0916/5320324002004010.shtm"
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "type": "web_search_call",
+      "action": {
+        "query": "普通高中生物学课程标准2017版 课程结构 必修 选择性必修 选修;普通高中生物学课程标准 课程标准的作用 教材编写 教学 评估 考试命题;普通高中生物学课程标准2017版 目录 主要框架",
+        "type": "search"
+      },
+      "status": "completed",
+      "id": "ws_02178971160545200000000000000000000ffffac183ccb63bbd7"
+    },
+    {
+      "type": "web_search_call",
+      "action": {
+        "query": "课程标准 教材编写 教学 评估 考试命题 依据 国家管理和评价基础教育课程的基础",
+        "type": "search"
+      },
+      "status": "completed",
+      "id": "ws_02178971162689500000000000000000000ffffac183ccbd9a2f3"
+    }
+  ],
+  "sourceUrls": [
+    "https://m.zxxk.com/soft/59486941.html",
+    "https://caidian.wuhaneduyun.cn/index.php?id=1617319656&r=space%2Fperson%2Fblogwap%2Fview",
+    "https://max.book118.com/html/2021/0916/5320324002004010.shtm",
+    "https://huiwen.hgnu.edu.cn/mspace/searchDetailLocal/m674417b166abf4c7a757791427706c1c",
+    "https://zy.gdedu.gov.cn/studio/index.php?id=63890&r=studio%2Fpost%2Fview&sid=300208",
+    "https://hudong.moe.gov.cn/fbh/live/2022/54382/zjwz/202204/t20220421_620116.html",
+    "http://www.moe.gov.cn:8080/jyb_xwfb/s5147/202609/t20260907_1449502.html",
+    "https://edu.wanfangdata.com.cn/Subject/Detail/c8b211f0-8fce-4d7e-ae1c-99dec014e20d"
+  ],
+  "model": "doubao-seed-2-1-turbo-260628",
+  "usage": {
+    "input_tokens": 15384,
+    "output_tokens": 4903,
+    "total_tokens": 20287,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens_details": {
+      "reasoning_tokens": 4070
+    },
+    "tool_usage": {
+      "web_search": 4
+    },
+    "tool_usage_details": {
+      "web_search": {
+        "search_engine": 4
+      }
+    }
+  },
+  "responseId": "resp_021789711584698427deff93a3e6360e32202b6d931cb30fb482d",
+  "checkedAt": "2026-09-18T06:07:55.095Z"
+}

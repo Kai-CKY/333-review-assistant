@@ -1,0 +1,28 @@
+{
+  "name": "333-review-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env.local apps/api/src/server.js",
+    "start": "node --env-file=.env.local apps/api/src/server.js",
+    "dev:demo": "node apps/api/src/server.js",
+    "test": "node --test apps/api/test/*.test.js",
+    "test:integration": "node --test apps/api/test/integration.test.js",
+    "feishu:create": "node scripts/create-feishu-app.mjs",
+    "feishu:update": "node scripts/update-feishu-app.mjs",
+    "feishu:enable": "node scripts/enable-feishu-test.mjs",
+    "feishu:group-test": "node scripts/arm-feishu-group-test.mjs",
+    "dev:feishu": "node --env-file=.env.local apps/api/src/server.js",
+    "ark:configure": "node scripts/configure-ark.mjs",
+    "ark:verify": "node --env-file=.env.local scripts/verify-ark.mjs",
+    "knowledge:verify": "node --env-file=.env.local scripts/verify-photo-knowledge.mjs",
+    "knowledge:export": "node scripts/knowledge-snapshot.mjs export",
+    "knowledge:restore": "node scripts/knowledge-snapshot.mjs restore"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.73.3",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

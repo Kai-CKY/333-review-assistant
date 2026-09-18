@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-18",
+  "timezone": "Asia/Shanghai",
+  "imagePath": "C:/Users/devuser/AppData/Local/Temp/codex-clipboard-14fabc90-28ad-4141-ae73-43946a269528.jpg",
+  "assets": [
+    {
+      "sha256": "f4e085e6e06f4cc4798a24c8479a5766b52261d27fc7fc985a7b6d2cf7d2e120",
+      "mime": "image/jpeg",
+      "bytes": 1024670
+    }
+  ],
+  "codex": {
+    "method": "Current-session vision; not a standalone OpenAI API call",
+    "baselineFrozenAt": "2026-09-18T14:02:27+08:00",
+    "baselineSha256": "94f0f9adafd1acfb0a9c86590026075972a6062085833eb95f20915bf5a20838"
+  },
+  "doubao": {
+    "model": "doubao-seed-2-1-turbo-260628",
+    "independentCalls": 2,
+    "ocrUsage": [
+      {
+        "completion_tokens": 807,
+        "prompt_tokens": 1435,
+        "total_tokens": 2242,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      },
+      {
+        "completion_tokens": 864,
+        "prompt_tokens": 1435,
+        "total_tokens": 2299,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    ],
+    "draftId": "KP-b8762b08",
+    "status": "awaiting_confirmation",
+    "items": 27,
+    "elapsedMs": 248297,
+    "searchError": "processing_failed",
+    "verified": 0,
+    "searchFailureCause": "Not preserved by original error mapper; do not assert timeout as established fact"
+  },
+  "smallBatchProbe": {
+    "sourceDraftId": "KP-b8762b08",
+    "itemIds": [
+      "K11",
+      "K13",
+      "K20"
+    ],
+    "startedAt": "2026-09-18T06:06:24.165Z",
+    "published": false,
+    "status": "completed",
+    "calls": 2,
+    "verified": 3,
+    "unresolved": 0,
+    "elapsedMs": 90931,
+    "transport": {
+      "httpStatus": 200,
+      "providerStatus": "completed"
+    }
+  },
+  "published": false,
+  "feishuMessagesSent": 0,
+  "limitations": [
+    "No full human gold transcript or character accuracy percentage",
+    "Small-batch success is not full-page verification",
+    "No Yangyang confirmation",
+    "No end-to-end live group test in this run"
+  ]
+}

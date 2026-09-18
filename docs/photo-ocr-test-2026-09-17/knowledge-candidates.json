@@ -1,0 +1,53 @@
+{
+  "schema_version": "photo-knowledge-draft-v1",
+  "created_on": "2026-09-17",
+  "scope": "local_test_only",
+  "published": false,
+  "reviewer": "Codex conversation; no human gold-standard review",
+  "frequency_label": {"value": "高频", "source": "user_provided", "exam_frequency_verified": false},
+  "recognition_provenance": {"codex": "codex-transcription.md", "doubao": "doubao-response.json", "image_manifest": "run-manifest.json", "alignment_report": "REPORT.md", "standalone_openai_api_called": false},
+  "status_definitions": {
+    "verified_summary": "知识概括有列出的文献依据，不表示照片逐字认证，也不表示已由教师审核",
+    "needs_review": "仅保留候选，不用于生成确定性标准答案"
+  },
+  "sources": [
+    {"id":"S1","title":"礼记·学记","url":"https://zh.wikisource.org/zh-hans/禮記/學記","kind":"primary_text_transcription"},
+    {"id":"S2","title":"论衡·命义","url":"https://ctext.org/lunheng/ming-yi/zhs","kind":"primary_text_search_excerpt"},
+    {"id":"S3","title":"论衡·超奇","url":"https://ctext.org/lunheng/chao-qi/zh","kind":"primary_text_search_excerpt"},
+    {"id":"S4","title":"教育学知识伦理价值追求与思维逻辑的统一","url":"https://epc.swu.edu.cn/info/1181/4372.htm","kind":"academic_article"},
+    {"id":"S5","title":"实验论","url":"https://kzxt.chinakongzi.org/baike/MINGCI/KEJI/201707/t20170714_138509.htm","kind":"reference_article"},
+    {"id":"S6","title":"陕西师范大学学术文章：引述论衡·问孔","url":"https://jsjxfz.snnu.edu.cn/__local/2/DF/88/D591C5CAC2D0E74773843B3CBB9_EB9B08B6_2E12F.pdf","kind":"academic_article"},
+    {"id":"S7","title":"王夫之·礼记章句卷十八学记","url":"https://guxuo.com/mj/w/wfz/ljzj/124.htm","kind":"primary_commentary_transcription"},
+    {"id":"S8","title":"第三章 先秦时期的教育思想","url":"https://oss0.changxianggu.com/book/chapter/269_9787040519358.pdf","kind":"textbook_excerpt"},
+    {"id":"S9","title":"安康学院：新版教育学教材第一章","url":"https://jykx.aku.edu.cn/info/1260/3297.htm","kind":"university_teaching_material"},
+    {"id":"S10","title":"中国哲学书电子化计划：学记","url":"https://ctext.org/liji/xue-ji/ens","kind":"primary_text_search_excerpt"}
+  ],
+  "items": [
+    {"id":"WC-01","image":1,"region":"上部人性论","title":"正性、随性、遭性","text":"王充以正、随、遭说明人性：正性禀五常之性，随性随父母之性，遭性涉及孕育期间所遭因素。","layer":"historical_theory_summary","sources":["S2"],"status":"verified_summary","note":"历史思想，不作为现代遗传或胎教科学结论。"},
+    {"id":"WC-02","image":1,"region":"教育作用第二行","title":"知学与力量","text":"王充在《论衡·效力》中提出“人有知学，则有力矣”，强调知识学习与能力的联系。","layer":"quote_and_summary","sources":["S4"],"status":"verified_summary"},
+    {"id":"WC-03","image":1,"region":"教育目的与人才列表","title":"人才分类与鸿儒","text":"《超奇》区分儒生、通人、文人、鸿儒，分别着重讲解经典、博览古今、上书奏记和独立著述。笔记将培养文人和鸿儒归纳为教育目的。","layer":"primary_text_and_note_summary","sources":["S3"],"status":"verified_summary","note":"不把文吏加在前面的五项笔记框架当作该段原典逐字分类。"},
+    {"id":"WC-04","image":1,"region":"思考与求是","title":"效验与有证","text":"讨论应有事实依据和证据，不能只凭动听言辞。","layer":"summary","sources":["S5"],"status":"verified_summary"},
+    {"id":"WC-05","image":1,"region":"下部问难与距师","title":"问难与距师","text":"不盲从师说和古说，敢于提出疑问、辨明是非。","layer":"summary","sources":["S6"],"status":"verified_summary","note":"不把图片模糊行直接替换为豆包补出的唯师是从、唯书是从。"},
+    {"id":"XJ-01","image":2,"region":"首行","title":"学记的地位","text":"《学记》是《礼记》的一篇，通常被教育史教材视为我国古代最早专门论述教育教学的论著。","layer":"textbook_summary","sources":["S9"],"status":"verified_summary"},
+    {"id":"XJ-02","image":2,"region":"教育作用和目的","title":"教育的作用","text":"《学记》重视学习对人成长的作用，将教育置于建国治民的重要位置。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-03","image":2,"region":"教学原则第1项","title":"预防性原则","text":"禁于未发之谓豫：问题发生前先行预防。","layer":"quote_and_modern_category","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-04","image":2,"region":"教学原则第2项","title":"循序渐进原则","text":"不陵节而施之谓孙：按阶段和顺序教学，不超越应有次第。","layer":"quote_and_modern_category","sources":["S1"],"status":"verified_summary","note":"引文保留孙，不直接改写为顺。"},
+    {"id":"XJ-05","image":2,"region":"教学原则第3项","title":"藏息相辅原则","text":"正式学习与退息时的学习活动互相配合。课内外结合是现代解释，古文句读存在版本差异。","layer":"modern_category","sources":["S1","S10"],"status":"verified_summary"},
+    {"id":"XJ-06","image":2,"region":"教学原则第4项","title":"及时施教原则","text":"当其可之谓时：把握适宜的教育时机。","layer":"quote_and_modern_category","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-07","image":2,"region":"教学原则第5项","title":"学习观摩原则","text":"相观而善之谓摩：通过相互观摩切磋促进学习。","layer":"quote_and_modern_category","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-08","image":2,"region":"教学原则第6项第一段","title":"长善救失与四失","text":"了解学生差异，发扬长处、补救缺失；学习的四失为多、寡、易、止。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-09","image":2,"region":"教学原则第6项第二段","title":"王夫之对四失的解释","text":"王夫之指出多、寡、易、止虽各有失，也各有可发展之善，救失可以促进其长处。","layer":"later_commentary","attribution":"王夫之《礼记章句》卷十八","sources":["S7","S8"],"status":"verified_summary","note":"不可作为《学记》原文收录。豆包各有美焉与核验本各有善焉不一致。"},
+    {"id":"XJ-10","image":2,"region":"教学原则第7项","title":"启发诱导原则","text":"道而弗牵、强而弗抑、开而弗达：引导、勉励和启发学生，促进独立思考。","layer":"quote_and_modern_category","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-11","image":2,"region":"教学方法第1项","title":"讲解","text":"表达应简约而通达，含义精深，并善用譬喻。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-12","image":2,"region":"教学方法第2项","title":"答问","text":"善待问者如撞钟，按问题的深浅作适当回应。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-13","image":2,"region":"教师观尊师","title":"尊师重道","text":"师严然后道尊，道尊然后民知敬学。此处不能把严师只解作严厉惩罚学生。","layer":"quote_and_summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-14","image":2,"region":"教师要求第1至3项","title":"教师的能力要求","text":"教师不能只靠记诵，需要理解教学成败、学习难易与学生差异，能够善加启发。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"XJ-15","image":2,"region":"教师要求第4项","title":"教学相长","text":"学习使人知道自身不足，教学使人发现困惑，进而反省和自强；教与学相互促进。","layer":"summary","sources":["S1"],"status":"verified_summary"},
+    {"id":"P-01","image":1,"region":"对个人作用","title":"强调胎教候选","text":"豆包读作强调胎教，Codex初读不清。","layer":"raw_candidate","sources":[],"status":"needs_review"},
+    {"id":"P-02","image":1,"region":"教育内容","title":"博通百家及自然社会知识","text":"原笔记概括教育内容为博通百家，从自然世界和人类社会获取知识；需对照指定教材。","layer":"note_summary","sources":[],"status":"needs_review"},
+    {"id":"P-03","image":1,"region":"文吏和问难与距师引句","title":"模糊引句的逐字转写","text":"文吏引句末字、问难与距师两行存在识别差异，标准概括可用但逐字照片转写暂缓。","layer":"raw_candidate","sources":[],"status":"needs_review"},
+    {"id":"P-04","image":2,"region":"教师地位解释行","title":"为师为长为君解释","text":"该行两模型读法不一致，不能自动采纳语句最通顺的版本。","layer":"raw_candidate","sources":[],"status":"needs_review"},
+    {"id":"P-05","image":2,"region":"练习法","title":"练习法的教材归纳","text":"对所学内容不断加以练习；该分类名称为笔记概括，本次不作为原典逐字概念认证。","layer":"note_summary","sources":[],"status":"needs_review"},
+    {"id":"P-06","image":1,"region":"边缘邻栏与跨图批注","title":"裁切和模糊批注","text":"图1边缘邻栏及两图不清批注仅归档，不生成确定性知识条目。","layer":"annotation","sources":[],"status":"needs_review"}
+  ]
+}

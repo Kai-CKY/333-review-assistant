@@ -1,0 +1,9 @@
+node_modules/
+# Runtime database mixes conversations, learner records and knowledge.
+# Export the complete knowledge-only snapshot before committing.
+.data/*
+!.data/knowledge-export/
+.data/knowledge-export/**/*.tmp
+.env
+.env.local
+coverage/

@@ -1,0 +1,19 @@
+{
+  "sourceDraftId": "KP-b8762b08",
+  "itemIds": [
+    "K11",
+    "K13",
+    "K20"
+  ],
+  "startedAt": "2026-09-18T06:06:24.165Z",
+  "published": false,
+  "status": "completed",
+  "calls": 2,
+  "verified": 3,
+  "unresolved": 0,
+  "elapsedMs": 90931,
+  "transport": {
+    "httpStatus": 200,
+    "providerStatus": "completed"
+  }
+}
