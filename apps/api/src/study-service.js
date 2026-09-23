@@ -1,6 +1,7 @@
 import { todayKey } from './domain/date.js';
 import { buildTodayPlan } from './domain/plan.js';
 import { FeedbackService } from './feedback-service.js';
+import { activeStudyPoints } from './knowledge/library.js';
 
 /**
  * Channel-neutral learning use cases. The browser API and the Feishu adapter
@@ -29,7 +30,7 @@ export class StudyService {
   async getDashboard(date = todayKey()) {
     const data = await this.repository.read();
     const tasks = buildTodayPlan({
-      knowledgePoints: data.knowledgePoints,
+      knowledgePoints: activeStudyPoints(data),
       reviewStates: data.reviewStates,
       targetDate: date,
       maximumTasks: data.user.dailyTaskLimit
@@ -40,7 +41,7 @@ export class StudyService {
       .sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)))
       .slice(0, 8);
     const selfReportedCompletedToday = activeTaskCompletions.filter((item) => item.reportedOn === date).length;
-    const weakPoints = data.knowledgePoints
+    const weakPoints = activeStudyPoints(data)
       .map((point) => ({ point, state: data.reviewStates.find((item) => item.knowledgePointId === point.id) }))
       .filter((item) => item.state && item.state.mastery < 0.62)
       .sort((a, b) => a.state.mastery - b.state.mastery)
@@ -58,7 +59,7 @@ export class StudyService {
         pdfParser: 'not_configured',
         modelProvider: this.isModelConfigured() ? 'configured' : 'not_configured',
         scheduler: 'mvp_adapter',
-        dataMode: data.knowledgePoints.every((point) => point.sourceLabel === '演示知识库') ? 'demo' : 'mixed'
+        dataMode: data.knowledgePoints.some(point => point.sourceKind === 'saved_knowledge' && !point.archived) ? 'saved' : 'demo'
       }
     };
   }
@@ -76,7 +77,7 @@ export class StudyService {
 
   async getPracticeTask(knowledgePointId, { type = 'practice', label = '自主练习' } = {}) {
     const data = await this.repository.read();
-    const point = data.knowledgePoints.find((item) => item.id === knowledgePointId);
+    const point = activeStudyPoints(data).find((item) => item.id === knowledgePointId);
     if (!point) throw new Error('knowledge point not found');
     const state = data.reviewStates.find((item) => item.knowledgePointId === knowledgePointId);
     return {
@@ -88,7 +89,11 @@ export class StudyService {
       prompt: point.recallPrompt,
       estimatedMinutes: 7,
       mastery: state?.mastery ?? 0.2,
-      source: point.sourceLabel
+      source: point.sourceLabel,
+      ...(point.sourceKind === 'saved_knowledge' ? { reference: {
+        text: point.text, evidenceStatus: point.evidenceStatus, citations: point.citations,
+        documentId: point.sourceDocumentId, itemId: point.sourceItemId, version: point.sourceVersion
+      } } : {})
     };
   }
 
@@ -96,7 +101,7 @@ export class StudyService {
     const needle = String(query ?? '').trim().replace(/\s+/g, '').toLowerCase();
     if (!needle) return null;
     const data = await this.repository.read();
-    const scored = data.knowledgePoints
+    const scored = activeStudyPoints(data)
       .map((point) => {
         const title = point.title.replace(/\s+/g, '').toLowerCase();
         const score = title === needle ? 100 : title.includes(needle) ? 80 : needle.includes(title) ? 70 : 0;

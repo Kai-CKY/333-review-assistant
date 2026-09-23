@@ -1,3 +1,5 @@
+import { knowledgeContextRule } from './library.js';
+
 export function parseObject(content) {
   const text = String(content ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try { const result = JSON.parse(text); if (result && typeof result === 'object' && !Array.isArray(result)) return result; } catch {}
@@ -6,6 +8,13 @@ export function parseObject(content) {
 
 export class PhotoKnowledgeModel {
   constructor(provider) { this.provider = provider; }
+  async answerSavedKnowledge(question, items) {
+    const result = await this.provider.complete({ temperature: 0.2, maxTokens: 600, messages: [
+      { role: 'system', content: `你是333学习助手。依据当前群/话题命中的资料回答问题，简洁中文。${knowledgeContextRule}` },
+      { role: 'user', content: JSON.stringify({ question: question.slice(0, 3000), saved_knowledge: items }) }
+    ] });
+    return result.content;
+  }
   async json(system, content) {
     const result = await this.provider.complete({ temperature: 0.1, maxTokens: 10000, messages: [{ role: 'system', content: system }, { role: 'user', content }] });
     if (result.finishReason && result.finishReason !== 'stop') throw new Error('model_output_incomplete');

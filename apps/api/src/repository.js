@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { todayKey } from './domain/date.js';
 import { scheduleReview } from './domain/scheduler.js';
+import { libraryPolicy, syncSavedKnowledge } from './knowledge/library.js';
 
 function setDefault(object, key, value) {
   if (Object.prototype.hasOwnProperty.call(object, key)) return false;
@@ -132,7 +133,7 @@ function normalizeData(data) {
   changed = setDefault(data.user, 'targetMajor', null) || changed;
   changed = setDefault(data.user, 'dailyAvailableMinutes', null) || changed;
   changed = setDefault(data.user, 'profileVersion', 'li-yangyang-v1') || changed;
-  for (const key of ['knowledgePoints', 'reviewStates', 'reviewLogs', 'answerAttempts', 'answerFeedbacks', 'feedbackJobs', 'taskCompletionLogs']) {
+  for (const key of ['knowledgePoints', 'reviewStates', 'reviewLogs', 'memoryEvents', 'answerAttempts', 'answerFeedbacks', 'feedbackJobs', 'taskCompletionLogs']) {
     if (!Array.isArray(data[key])) {
       data[key] = [];
       changed = true;
@@ -142,22 +143,33 @@ function normalizeData(data) {
 }
 
 export class LocalRepository {
-  constructor(filePath) {
+  constructor(filePath, { knowledgePolicy = libraryPolicy() } = {}) {
     this.filePath = filePath;
+    this.knowledgePolicy = knowledgePolicy;
     this.mutationQueue = Promise.resolve();
   }
 
-  async read() {
+  async load() {
     try {
       const data = JSON.parse(await readFile(this.filePath, 'utf8'));
-      if (normalizeData(data)) await this.save(data);
-      return data;
+      const normalized = normalizeData(data);
+      const synced = syncSavedKnowledge(data, this.knowledgePolicy);
+      return { data, changed: normalized || synced };
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
       const seed = createSeedData();
-      await this.save(seed);
-      return seed;
+      return { data: seed, changed: true };
     }
+  }
+
+  async read() {
+    const operation = this.mutationQueue.then(async () => {
+      const { data, changed } = await this.load();
+      if (changed) await this.save(data);
+      return data;
+    });
+    this.mutationQueue = operation.catch(() => {});
+    return operation;
   }
 
   async save(data) {
@@ -169,8 +181,9 @@ export class LocalRepository {
 
   async mutate(callback) {
     const operation = this.mutationQueue.then(async () => {
-      const data = await this.read();
+      const { data } = await this.load();
       const result = await callback(data);
+      syncSavedKnowledge(data, this.knowledgePolicy);
       await this.save(data);
       return result;
     });
@@ -181,7 +194,7 @@ export class LocalRepository {
   async recordReview({ knowledgePointId, rating, reviewedOn = todayKey(), sourceId }) {
     return this.mutate((data) => {
       const knowledgePoint = data.knowledgePoints.find((item) => item.id === knowledgePointId);
-      if (!knowledgePoint) throw new Error('knowledge point not found');
+      if (!knowledgePoint || knowledgePoint.archived || knowledgePoint.hidden || knowledgePoint.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
       const duplicate = sourceId && data.reviewLogs.find((item) => item.sourceId === sourceId);
       if (duplicate) {
         return {
@@ -193,6 +206,9 @@ export class LocalRepository {
       }
       const existing = data.reviewStates.find((item) => item.knowledgePointId === knowledgePointId)
         ?? { knowledgePointId, stage: 'new', intervalDays: 0, mastery: 0.3, lapseCount: 0 };
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewedOn) || !Number.isFinite(Date.parse(`${reviewedOn}T00:00:00Z`)) || new Date(`${reviewedOn}T00:00:00Z`).toISOString().slice(0, 10) !== reviewedOn || (existing.forgettingAnchorOn && reviewedOn < existing.forgettingAnchorOn)) {
+        throw Object.assign(new Error('复习日期无效或早于本次遗忘日期。'), { statusCode: 400 });
+      }
       const next = scheduleReview(existing, rating, reviewedOn);
       data.reviewStates = data.reviewStates.filter((item) => item.knowledgePointId !== knowledgePointId);
       data.reviewStates.push(next);
@@ -211,6 +227,8 @@ export class LocalRepository {
 
   async saveAnswer({ knowledgePointId, content, submittedOn = todayKey(), sourceId, feedbackStatus = 'not_requested' }) {
     return this.mutate((data) => {
+      const point = data.knowledgePoints.find(item => item.id === knowledgePointId);
+      if (!point || point.archived || point.hidden || point.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
       const duplicate = sourceId && data.answerAttempts.find((item) => item.sourceId === sourceId);
       if (duplicate) return { ...duplicate, idempotent: true };
       const attempt = {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ConversationMemory } from '../agent/memory.js';
+import { savedItems, searchSavedItems, uploadTimestamp } from './library.js';
 
 function state(data) { return data.photoKnowledge ??= { schemaVersion: 1, drafts: {}, documents: {}, events: [] }; }
 function errorCode(error) { return ['search_not_enabled', 'search_not_configured', 'search_not_executed', 'search_incomplete', 'model_output_incomplete', 'invalid_model_json'].includes(error.message) ? error.message : 'processing_failed'; }
@@ -54,7 +55,7 @@ export class PhotoKnowledgeService {
       const store = state(data), prior = Object.values(store.drafts).find(d => d.scopeKey === scope.key && d.sourceMessageId === message.messageId);
       if (prior) return { ...structuredClone(prior), duplicate: true };
       const id = `KP-${randomUUID().slice(0, 8)}`;
-      return structuredClone(store.drafts[id] = { id, scopeKey: scope.key, sessionId: session.id, sourceMessageId: message.messageId, senderId: message.senderId, status: 'recognizing', createdAt: new Date().toISOString(), versions: [], reads: [], assets: [], actions: [] });
+      return structuredClone(store.drafts[id] = { id, scopeKey: scope.key, sessionId: session.id, sourceMessageId: message.messageId, sourceUploadedAt: uploadTimestamp(message.createTime) || new Date().toISOString(), senderId: message.senderId, status: 'recognizing', createdAt: new Date().toISOString(), versions: [], reads: [], assets: [], actions: [] });
     });
     if (draft.duplicate) return draft;
     try {
@@ -117,7 +118,7 @@ export class PhotoKnowledgeService {
       const accepted = v.verification.checks.filter(c => ['supported', 'corrected'].includes(c.status));
       const pending = v.verification.checks.filter(c => c.status === 'unresolved');
       if (!accepted.length || (pending.length && !partial)) return { ok: false, message: pending.length && accepted.length ? `还有 ${pending.length} 项待核验。请修改，或明确回复“确认已核验部分 ${id} v${version}”。` : '尚无完成核验的条目，暂不能保存为知识库。可开通搜索后重新核验。' };
-      const doc = store.documents[id] ??= { id, scopeKey: scope.key, createdAt: new Date().toISOString(), revisions: [] };
+      const doc = store.documents[id] ??= { id, scopeKey: scope.key, uploadedAt: d.sourceUploadedAt || d.createdAt, createdAt: new Date().toISOString(), revisions: [] };
       const items = accepted.map(c => ({ ...v.content.items.find(i => i.id === c.id), text: c.text, citations: c.citations, evidenceStatus: c.status }));
       const revision = { version, title: v.content.title, items, contentHash: v.contentHash, confirmedBy: senderId, confirmationMessageId: messageId, sourceDraftId: id, sourceMessageId: d.sourceMessageId, savedAt: new Date().toISOString(), excludedIds: pending.map(c => c.id) };
       doc.revisions.push(revision); doc.currentVersion = version; doc.title = v.content.title;
@@ -137,11 +138,20 @@ export class PhotoKnowledgeService {
     }
     if (/^(没问题[，, ]*)?(确认保存|可以保存|保存吧)[。！!]*$/.test(text)) text = '确认保存';
     const command = text.match(/^(确认已核验部分|确认保存|确认|修改并保存|修改|建议|重新核验|查看草稿|知识库)(?:\s+(KP-[a-f0-9]{8}))?(?:\s+v(\d+))?\s*(?:[：:]\s*([\s\S]+))?$/i);
-    if (!command) return null;
+    if (!command) {
+      // Existing group controller already routes here; no changes to its deployment patches.
+      if (/^(知识库查询|修改|建议|确认|重新核验|查看草稿)/.test(text)) return null;
+      const items = searchSavedItems(savedItems(await this.repository.read(), key => key === scope.key), text);
+      if (!items.length) return null;
+      const sources = items.map(item => `${item.title}【${['supported', 'corrected'].includes(item.evidenceStatus) ? '有来源支持' : '待核验，仅供参考'}】`).join('\n');
+      let answer;
+      try { answer = await this.model?.answerSavedKnowledge?.(text, items); } catch { /* Stored references remain available during a model outage. */ }
+      return { text: `${answer || items.map(item => `${item.title}\n${item.text}`).join('\n\n')}\n\n入库资料：\n${sources}` };
+    }
     const [, verb, explicitId, versionText, body] = command;
     if (verb === '知识库') {
       const docs = Object.values(state(await this.repository.read()).documents).filter(d => d.scopeKey === scope.key && (!explicitId || d.id === explicitId));
-      return { text: docs.length ? docs.map(d => { const v = d.revisions.find(v => v.version === d.currentVersion); return `${d.id} v${v.version}｜${v.title}\n${v.items.map(i => `${i.id}. ${i.title}\n${i.text}\n${i.citations.join('\n')}`).join('\n\n')}`; }).join('\n\n') : '当前会话范围内还没有已确认的知识库内容。' };
+      return { text: docs.length ? docs.map(d => { const v = d.revisions.find(v => v.version === d.currentVersion); return `${v.title}\n${v.items.map(i => `${i.title}\n${i.text}\n${i.citations.join('\n')}`).join('\n\n')}`; }).join('\n\n') : '当前会话范围内还没有已确认的知识库内容。' };
     }
     const session = await this.memory.session(scope);
     const candidates = Object.values(state(await this.repository.read()).drafts).filter(d => d.scopeKey === scope.key && d.sessionId === session.id && ['awaiting_confirmation', 'saved'].includes(d.status));

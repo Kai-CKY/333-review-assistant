@@ -7,6 +7,10 @@ let statusTimer = null;
 
 async function request(url, options) {
   const response = await fetch(url, options);
+  if (response.status === 401) {
+    window.location.replace('/login');
+    throw new Error('登录已过期，请重新登录。');
+  }
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || '请求失败');
   return payload;
@@ -25,6 +29,7 @@ function escapeHtml(value) {
 function daysUntil(dateKey) {
   const today = new Date();
   const target = new Date(`${dateKey}T00:00:00+08:00`);
+  if (Number.isNaN(target.getTime())) return null;
   return Math.max(0, Math.ceil((target - today) / 86_400_000));
 }
 
@@ -78,15 +83,19 @@ function completionMarkup(entry, index, dashboardDate) {
 
 function render(data) {
   state.dashboard = data;
+  if (state.role === 'admin') document.querySelector('.topbar h1').textContent = '羊羊的学习进度与复习安排';
   const tasks = Array.isArray(data.tasks) ? data.tasks : [];
   const weakPoints = Array.isArray(data.weakPoints) ? data.weakPoints : [];
   const recentTaskCompletions = Array.isArray(data.recentTaskCompletions) ? data.recentTaskCompletions : [];
   const completedToday = Math.max(0, Number(data.completedToday) || 0);
   const selfReportedCompletedToday = Math.max(0, Number(data.selfReportedCompletedToday) || 0);
   document.querySelector('#study-date').textContent = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'full' }).format(new Date());
-  document.querySelector('#exam-countdown').innerHTML = `<span>距暂定考试日</span><strong>${daysUntil(data.targetExamDate)}<small>天</small></strong>`;
-  const taskSummary = tasks.length ? `今天只做 ${tasks.length} 个知识点。` : '今日计划已完成。';
-  const taskList = tasks.length ? tasks.map(taskMarkup).join('') : '<div class="empty">没有待办任务。你完成得很好。</div>';
+  const countdown = daysUntil(data.targetExamDate);
+  document.querySelector('#exam-countdown').innerHTML = countdown === null
+    ? '<span>考试日期</span><strong class="date-unset">待设置</strong>'
+    : `<span>距暂定考试日</span><strong>${countdown}<small>天</small></strong>`;
+  const taskSummary = tasks.length ? `今日待复习 ${tasks.length} 个知识点。` : '今日暂无到期任务。';
+  const taskList = tasks.length ? tasks.map(taskMarkup).join('') : '<div class="empty">今天的到期任务已完成，可在知识索引查看下次复习日期。</div>';
   const completionList = recentTaskCompletions.length
     ? `<ol class="completion-list">${recentTaskCompletions.map((entry, index) => completionMarkup(entry, index, data.date)).join('')}</ol>`
     : '<div class="completion-empty"><strong>还没有完成备案</strong><span>在飞书私聊里说“我今天完成了……”，这里就会自动留下记录。</span></div>';
@@ -110,6 +119,7 @@ function render(data) {
 }
 
 function openTask(taskId) {
+  if (state.role === 'admin') return showStatus('管理员可查看羊羊的任务和记忆时间线；作答、自评由羊羊完成。', 'success');
   const task = state.dashboard.tasks.find((item) => item.id === taskId);
   if (!task) return;
   // Do not let a completed request from the previously open task overwrite the
@@ -119,6 +129,8 @@ function openTask(taskId) {
   state.answerSourceId = newAnswerSourceId();
   state.answerSaved = false;
   state.answerSaving = false;
+  document.querySelector('#dialog-status').textContent = '';
+  document.querySelector('#answer-reference').hidden = true;
   answer.value = '';
   document.querySelector('#task-label').textContent = task.label;
   document.querySelector('#task-title').textContent = task.title;
@@ -131,6 +143,7 @@ async function saveAnswer() {
   if (state.answerSaved) return showStatus('这份答案已经保存，结构提示会继续在这里显示。', 'success');
   if (state.answerSaving) return showStatus('答案正在保存，请稍候。', 'success');
   state.answerSaving = true;
+  const sourceId = state.answerSourceId;
   try {
     const result = await request('/api/answer-attempts', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -140,11 +153,18 @@ async function saveAnswer() {
         sourceId: state.answerSourceId ?? (state.answerSourceId = newAnswerSourceId())
       })
     });
+    if (state.answerSourceId !== sourceId) return;
     state.answerSaved = true;
+    const reference = result.job?.taskSnapshot?.reference;
+    if (reference?.text) {
+      const container = document.querySelector('#answer-reference');
+      container.textContent = `${['supported', 'corrected'].includes(reference.evidenceStatus) ? '入库参考要点' : '待核验资料，仅供参考，不是标准答案'}\n${reference.text}`;
+      container.hidden = false;
+    }
     showStatus(result.message, 'success');
     if (result.job?.id) void pollFeedbackJob(result.job.id);
   } finally {
-    state.answerSaving = false;
+    if (state.answerSourceId === sourceId) state.answerSaving = false;
   }
 }
 
@@ -197,17 +217,22 @@ async function pollFeedbackJob(jobId) {
 }
 
 async function rate(rating) {
-  if (!state.activeTask) return;
-  await request('/api/reviews', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ knowledgePointId: state.activeTask.knowledgePointId, rating })
-  });
-  dialog.close();
-  showStatus('已记录。下一次复习已重新安排。', 'success');
-  await loadDashboard();
+  if (!state.activeTask || state.ratingSaving) return;
+  if (!state.answerSaved) return showStatus('先保存回忆答案（想不起来也可以如实写下），再完成自评。', 'warning');
+  state.ratingSaving = true;
+  try {
+    const result = await request('/api/reviews', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ knowledgePointId: state.activeTask.knowledgePointId, rating, sourceId: `review:${state.answerSourceId}` })
+    });
+    dialog.close();
+    showStatus(`已记录。下次复习：${result.state.nextReviewOn}。`, 'success');
+    await loadDashboard();
+  } finally { state.ratingSaving = false; }
 }
 
 function showStatus(message, kind, duration = 3_600) {
+  if (dialog.open) document.querySelector('#dialog-status').textContent = message;
   if (statusTimer) window.clearTimeout(statusTimer);
   status.textContent = message;
   status.className = `status visible ${kind}`;
@@ -218,9 +243,45 @@ function showStatus(message, kind, duration = 3_600) {
 }
 
 async function loadDashboard() {
-  try { render(await request('/api/dashboard')); }
+  try {
+    if (!state.role) state.role = (await request('/api/session')).role;
+    const [data, points] = await Promise.all([request('/api/dashboard'), request('/api/knowledge-points')]);
+    render(data);
+    renderKnowledge(points);
+    if (state.role === 'admin') {
+      document.querySelectorAll('[data-task], [data-practice]').forEach(button => { button.disabled = true; button.textContent = '管理员只读'; });
+    }
+  }
   catch (error) { showStatus(`无法加载本地数据：${error.message}`, 'warning'); }
 }
+
+function renderKnowledge(points) {
+  const expanded = new Set([...document.querySelectorAll('#knowledge details[open]')].map(item => item.dataset.point));
+  const saved = points.filter(point => point.sourceKind === 'saved_knowledge');
+  const container = document.querySelector('#knowledge');
+  container.innerHTML = `<div class="section-heading"><div><p class="eyebrow">已入库资料</p><h2 id="knowledge-title">知识索引</h2></div><span class="help-text">${saved.length} 个知识点 · 每 30 秒更新</span></div>` +
+    (saved.length ? saved.map(point => `<details class="knowledge-entry"><summary><strong>${escapeHtml(point.title)}</strong><span>${['supported', 'corrected'].includes(point.evidenceStatus) ? '有来源支持' : '待核验，仅供参考'}</span></summary><p class="help-text">${escapeHtml(point.sourceTitle)}</p><div class="knowledge-text">${escapeHtml(point.text)}</div><p class="help-text">以前学过；${escapeHtml(point.forgottenOn ? `${point.forgottenOn} 上传时发现遗忘` : '上传日期待确认')}。${escapeHtml(point.state?.nextReviewOn ? `下次复习：${point.state.nextReviewOn}` : '')}</p><ol class="memory-timeline" aria-label="记忆时间线">${(point.timeline || []).map(event => `<li><time>${escapeHtml(event.on)}</time> · ${escapeHtml(event.type === 'forgotten_upload' ? '发现遗忘，当日待复习' : `完成回忆：${({ again: '没想起来', hard: '很吃力', good: '基本掌握', easy: '很轻松' })[event.rating]}；下次 ${event.nextReviewOn}`)}</li>`).join('')}</ol>${point.practiceEligible ? `<button type="button" class="secondary" data-practice="${escapeHtml(point.id)}">开始回忆</button>` : '<p class="help-text">上传日期待确认，暂不自动排程。</p>'}</details>`).join('') : '<p class="empty">还没有可显示的入库资料。确认保存后会自动出现在这里。</p>');
+  container.querySelectorAll('[data-practice]').forEach(button => button.addEventListener('click', () => {
+    const point = points.find(p => p.id === button.dataset.practice);
+    const task = { id: `practice:${point.id}`, knowledgePointId: point.id, title: point.title, prompt: point.recallPrompt, label: '自主练习' };
+    state.dashboard.tasks = [...state.dashboard.tasks.filter(t => t.id !== task.id), task];
+    openTask(task.id);
+  }));
+  container.querySelectorAll('details').forEach((entry, index) => { entry.dataset.point = saved[index].id; entry.open = expanded.has(saved[index].id); });
+}
+
+document.querySelector('#logout').addEventListener('click', async () => {
+  try {
+    await request('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    window.location.replace('/login');
+  } catch (error) { showStatus(error.message, 'warning'); }
+});
+// Pause during an answer; otherwise refresh latest text and preserve expanded entries.
+const refresh = () => {
+  if (!document.hidden && !dialog.open) void loadDashboard();
+};
+window.setInterval(refresh, 30000);
+window.addEventListener('focus', refresh);
 
 document.querySelector('#save-answer').addEventListener('click', () => saveAnswer().catch((error) => showStatus(error.message, 'warning')));
 document.querySelectorAll('[data-rating]').forEach((button) => button.addEventListener('click', () => rate(button.dataset.rating).catch((error) => showStatus(error.message, 'warning'))));

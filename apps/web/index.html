@@ -16,10 +16,11 @@
         </a>
         <nav aria-label="主导航">
           <a class="nav-item active" href="#today"><span>01</span>今日回忆</a>
-          <a class="nav-item muted" href="#knowledge"><span>02</span>知识索引</a>
+          <a class="nav-item" href="#knowledge"><span>02</span>知识索引</a>
           <a class="nav-item muted" href="#weakness"><span>03</span>易错清单</a>
           <a class="nav-item muted" href="#weekly"><span>04</span>每周回看</a>
         </nav>
+        <button id="logout" class="logout-button" type="button">退出登录</button>
         <div class="study-ritual"><p>复习原则</p><strong>先提取<br />再校准</strong><span>不用一次完美，先把记得的写下来。</span></div>
       </aside>
       <section class="content">
@@ -29,6 +30,7 @@
         </header>
         <div id="status" class="status" role="status"></div>
         <section id="dashboard" class="dashboard" aria-live="polite"></section>
+        <section id="knowledge" class="knowledge-index" aria-labelledby="knowledge-title"></section>
       </section>
     </main>
     <dialog id="review-dialog" class="review-dialog">
@@ -39,7 +41,9 @@
         <p id="task-prompt" class="prompt"></p>
         <label for="answer">先写你记得的内容</label>
         <textarea id="answer" rows="7" placeholder="从关键词、答题结构或一个例子开始。不求完整，先真实地回忆。"></textarea>
-        <p class="help-text">作答会保存在本机。模型未配置前，不会给出没有依据的评分。</p>
+        <p class="help-text">作答会保存在服务器。模型提示不会替你选择自评。</p>
+        <p id="dialog-status" class="help-text" role="status"></p>
+        <div id="answer-reference" class="knowledge-text" hidden></div>
         <div class="dialog-actions"><button id="save-answer" class="secondary" type="button">保存作答</button></div>
         <fieldset class="rating"><legend>这次回忆得怎么样？</legend><div>
           <button type="button" data-rating="again" class="rating-again">完全想不起来</button>

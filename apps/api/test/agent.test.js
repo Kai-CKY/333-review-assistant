@@ -74,7 +74,7 @@ test('group conversation keeps distinct speakers, shared group history and no pr
   const sent = [];
   const channel = { send: async (...args) => sent.push(args), rawClient: { im: { v1: { chatMembers: { get: async () => ({ code: 0, data: { items: [] } }) } } } } };
   const provider = { isConfigured: () => true, complete: async (request) => { requests.push(request); return { content: '我记住了。' }; } };
-  const options = { repository, provider, channel, chatId: 'oc_group', logger: { warn() {} } };
+  const options = { repository, provider, channel, chatId: 'oc_group', yangyangOpenId: 'ou_yang', logger: { warn() {} } };
   const handle = createGroupConversation(options);
   await handle({ senderId: 'ou_owner', messageId: 'm1', content: '我是小陈' });
   await handle({ senderId: 'ou_yang', messageId: 'm2', content: '我是羊羊' });
@@ -130,7 +130,7 @@ test('single-user prompt contains Yangyang profile and write boundaries', () => 
     targetExamDate: '2026-12-20',
     dailyTaskLimit: 5
   });
-  assert.match(prompt, /只服务李羊羊/);
+  assert.match(prompt, /当前私聊对象是学习者李羊羊/);
   assert.match(prompt, /已完成一轮复习/);
   assert.match(prompt, /不得自行修改掌握度、复习日期/);
   assert.match(prompt, /演示数据不得当成/);

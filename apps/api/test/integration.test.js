@@ -3,13 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
 import { LocalRepository } from '../src/repository.js';
 import { StudyService } from '../src/study-service.js';
 import { todayKey } from '../src/domain/date.js';
 import { readGroupHistory, saveHistoryProgress } from '../src/feishu/history-progress.js';
+import { startServer as startAuthenticatedServer } from './helpers/http-server.js';
 
 const chatId = 'oc_test', senderId = 'ou_learner';
 const message = { message_id: 'om_progress', sender: { id: senderId, sender_type: 'user' }, msg_type: 'text', create_time: '1750000000000', body: { content: JSON.stringify({ text: '今天完成教育学第一章，做了20道题，3道错题。' }) } };
@@ -22,20 +20,13 @@ async function fixture() {
 }
 
 async function startServer(file) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../src/server.js', import.meta.url))], {
-    env: { ...process.env, PORT: '0', DATA_FILE: file, FEISHU_ENABLED: 'false', ARK_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
-  });
-  const url = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(new Error('server startup timed out')); }, 10000);
-    child.once('error', (e) => { clearTimeout(timer); reject(e); });
-    child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`server exited ${code}`)); });
-    child.stdout.on('data', (chunk) => {
-      const match = chunk.toString().match(/http:\/\/localhost:\d+/);
-      if (match) { clearTimeout(timer); resolve(match[0]); }
-    });
-    child.stderr.resume();
-  });
-  return { url, stop: async () => { if (child.exitCode !== null) return; const exited = once(child, 'exit'); child.kill(); await exited; } };
+  const server = await startAuthenticatedServer(file);
+  try {
+    const response = await server.login();
+    assert.equal(response.status, 200);
+    server.headers = { cookie: response.headers.get('set-cookie').split(';')[0] };
+    return server;
+  } catch (error) { await server.stop(); throw error; }
 }
 
 test('Feishu history pagination, permission errors and incomplete reads are explicit', async () => {
@@ -74,22 +65,22 @@ test('historical progress persists before acknowledgement, deduplicates retries 
   assert.equal(after.taskCompletionLogs[0].reportedOn, '2026-09-16');
   let server = await startServer(file);
   t.after(async () => server.stop());
-  const getDashboard = async () => (await fetch(`${server.url}/api/dashboard?date=2026-09-16`)).json();
+  const getDashboard = async () => (await fetch(`${server.url}/api/dashboard?date=2026-09-16`, { headers: server.headers })).json();
   let dashboard = await getDashboard();
   assert.equal(dashboard.selfReportedCompletedToday, 1);
   assert.equal(dashboard.recentTaskCompletions[0].content, JSON.parse(message.body.content).text);
-  assert.equal((await fetch(server.url)).status, 200);
+  assert.equal((await fetch(server.url, { headers: server.headers })).status, 200);
   await server.stop();
   server = await startServer(file);
   dashboard = await getDashboard();
   assert.equal(dashboard.selfReportedCompletedToday, 1);
-  const response = await fetch(`${server.url}/api/answer-attempts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ knowledgePointId: before.knowledgePoints[0].id, content: '集成测试答案', sourceId: 'integration-answer' }) });
+  const response = await fetch(`${server.url}/api/answer-attempts`, { method: 'POST', headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify({ knowledgePointId: before.knowledgePoints[0].id, content: '集成测试答案', sourceId: 'integration-answer' }) });
   assert.equal(response.status, 202);
   const queued = await response.json();
   let feedback;
   const deadline = Date.now() + 3000;
   do {
-    feedback = await (await fetch(`${server.url}/api/feedback-jobs/${queued.job.id}`)).json();
+    feedback = await (await fetch(`${server.url}/api/feedback-jobs/${queued.job.id}`, { headers: server.headers })).json();
     if (!['queued', 'running'].includes(feedback.job.status)) break;
     await new Promise(resolve => setTimeout(resolve, 20));
   } while (Date.now() < deadline);

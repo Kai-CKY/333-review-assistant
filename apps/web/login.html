@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>登录 · 333 回忆工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-panel">
+      <span class="brand-mark">333</span>
+      <p class="eyebrow">回忆工作台</p>
+      <h1>从今天的回忆开始。</h1>
+      <p class="help-text">登录后继续你的知识整理与复习。</p>
+      <form id="login-form">
+        <label for="username">账号</label>
+        <input id="username" name="username" autocomplete="username" maxlength="80" required autofocus />
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required />
+        <p id="login-error" role="alert" aria-live="polite"></p>
+        <button class="primary" type="submit">登录工作台</button>
+      </form>
+    </main>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

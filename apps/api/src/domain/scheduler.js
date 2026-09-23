@@ -26,7 +26,7 @@ export function scheduleReview(state, rating, reviewedOn) {
   }
 
   const previousInterval = Number(state.intervalDays ?? 0);
-  const intervalDays = previousInterval === 0
+  const intervalDays = rating === 'again' ? 1 : previousInterval === 0
     ? firstIntervals[rating]
     : Math.max(1, Math.round(previousInterval * multipliers[rating]));
   const lapseCount = Number(state.lapseCount ?? 0) + (rating === 'again' ? 1 : 0);
@@ -40,7 +40,7 @@ export function scheduleReview(state, rating, reviewedOn) {
     lapseCount,
     mastery: Math.round(mastery * 100) / 100,
     lastReviewedOn: reviewedOn,
+    pendingForgottenReview: false,
     nextReviewOn: addDays(reviewedOn, intervalDays)
   };
 }
-

@@ -24,6 +24,7 @@ import { FeishuSessionStore } from './session-store.js';
 import { createGroupConversation } from './group-conversation.js';
 import { PhotoKnowledgeService } from '../knowledge/service.js';
 import { PhotoKnowledgeModel, ArkKnowledgeSearch } from '../knowledge/providers.js';
+import { feishuIdentityConfig, identifySender, canReceivePrivate, identityDescription } from '../agent/identity.js';
 
 const validRatings = new Set(ratings);
 const GROUP_TEST_POLL_MS = 5_000;
@@ -58,6 +59,7 @@ function readConfig() {
     groupTestConfigurationError = 'FEISHU_GROUP_TEST_ENABLED is set, but FEISHU_GROUP_TARGET_OPEN_ID is not a valid ou_ open ID; group test remains disabled.';
   }
   return {
+    ...feishuIdentityConfig(),
     enabled: enabled(process.env.FEISHU_ENABLED),
     appId: process.env.FEISHU_APP_ID?.trim(),
     appSecret: process.env.FEISHU_APP_SECRET?.trim(),
@@ -85,7 +87,7 @@ function commandFrom(content) {
 }
 
 function parseStartCommand(content) {
-  const match = content.trim().match(/^\/(?:开始|开始复习)\s+([1-5])$/);
+  const match = content.trim().match(/^\/(?:开始|开始复习)\s+([1-9]\d{0,3})$/);
   return match ? Number(match[1]) : null;
 }
 
@@ -135,8 +137,8 @@ export async function startFeishuBot({
 }) {
   const config = readConfig();
   if (!config.enabled) return { status: 'disabled' };
-  if (!config.appId || !config.appSecret || !config.testerOpenId) {
-    return { status: 'waiting_for_configuration', message: 'FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TESTER_OPEN_ID are required.' };
+  if (!config.appId || !config.appSecret || (config.dmMode === 'allowlist' && !config.dmAllowlist.length && !config.groupChatEnabled)) {
+    return { status: 'waiting_for_configuration', message: 'Configure Feishu credentials and identity bindings, or explicitly select FEISHU_DM_MODE=open.' };
   }
 
   const sessionStore = new FeishuSessionStore(repository);
@@ -146,14 +148,14 @@ export async function startFeishuBot({
     provider: feedbackProvider,
     profileProvider: () => studyService.getProfile()
   });
-  const naturalAgent = studyAgent ?? new ArkStudyAgent({ provider: feedbackProvider });
+  const naturalAgent = studyAgent ?? new ArkStudyAgent({ provider: feedbackProvider, repository });
   const channel = channelFactory({
     appId: config.appId,
     appSecret: config.appSecret,
     transport: 'websocket',
     policy: {
-      dmMode: 'allowlist',
-      dmAllowlist: [config.testerOpenId],
+      dmMode: config.dmMode,
+      dmAllowlist: config.dmAllowlist,
       // Even if the app later receives a group-message scope, only the
       // explicitly armed test group can cross the channel policy.
       groupAllowlist: config.groupChatEnabled || config.groupTestEnabled ? [config.testGroupId] : ['__group_test_disabled__'],
@@ -171,18 +173,18 @@ export async function startFeishuBot({
   channel.send = async (chatId, payload, options) => {
     const sent = await originalSend(chatId, payload, options);
     const message = sessionStore.context.getStore();
-    if (message?.chatType === 'p2p' && message.chatId === chatId && message.senderId === config.testerOpenId) {
+    if (message?.chatType === 'p2p' && message.chatId === chatId && canReceivePrivate(message.senderId, config)) {
       await sessionStore.memory.append(sessionStore.scope(message.senderId, chatId), { type: 'outbound', text: payload.text || JSON.stringify(payload.card || {}), replyTo: options?.replyTo, messageId: sent?.messageId });
     }
     return sent;
   };
   const knowledgeService = new PhotoKnowledgeService({ repository,
     model: new PhotoKnowledgeModel(feedbackProvider), search: new ArkKnowledgeSearch(),
-    approverId: config.groupTargetOpenId || config.testerOpenId });
+    approverId: config.learnerId });
   await knowledgeService.reconcile();
   const groupConversation = createGroupConversation({
     repository, provider: feedbackProvider, channel, chatId: config.testGroupId,
-    yangyangOpenId: config.groupTargetOpenId || config.testerOpenId, logger,
+    yangyangOpenId: config.learnerId, ownerOpenId: config.ownerId, logger,
     appId: config.appId, knowledgeService
   });
   const receiptReactionAvailable = typeof channel.addReaction === 'function';
@@ -847,6 +849,37 @@ export async function startFeishuBot({
     });
   }
 
+  async function handleNonLearner(message, identity) {
+    const send = text => channel.send(message.chatId, { text }, { replyTo: message.messageId });
+    const command = commandFrom(message.content);
+    const natural = deterministicNaturalIntent(message.content.replace(/羊羊的?/g, '我的'));
+    const readIntent = command || ({ show_today: 'today', show_progress: 'progress', show_weaknesses: 'weaknesses', show_completions: 'completions' }[natural?.type]);
+    if (identity.role === 'unbound') {
+      return send('当前账号尚未绑定身份，不会按羊羊处理，也不能查看她的学习记录。发送 /身份 获取你的账号标识，由管理员在服务器配置绑定。');
+    }
+    if (['today', 'progress', 'weaknesses', 'completions'].includes(readIntent)) {
+      const dashboard = await studyService.getDashboard();
+      const rows = readIntent === 'weaknesses' ? dashboard.weakPoints.map(p => p.title)
+        : readIntent === 'completions' ? dashboard.recentTaskCompletions.map(p => `${p.reportedOn}：${p.content}`)
+        : dashboard.tasks.map((p, i) => `${i + 1}. ${p.title}（${p.label}）`);
+      return send(`羊羊的学习数据（管理员只读）\n${dashboard.date}：已完成 ${dashboard.completedToday} 次复习，${dashboard.selfReportedCompletedToday} 条完成自报。\n${rows.join('\n') || '暂无记录。'}`);
+    }
+    if (command || completionReportFrom(message.content) || /^\/(开始|开始复习)/.test(message.content)) {
+      return send('你是系统管理员，不建立学习档案，也不代替羊羊作答、自评或写入完成记录。可以发送 /今日、/进度、/薄弱、/记录 查看羊羊的数据。');
+    }
+    const quick = deterministicConversationReply(message.content, identity.role);
+    if (quick) return send(quick);
+    if (!naturalAgent.isConfigured()) return send('你是系统管理员。可用 /今日、/进度、/薄弱、/记录 查看羊羊的学习数据。');
+    queueModelReply(message.chatId, 'Administrator chat', async () => {
+      const dashboard = await studyService.getDashboard();
+      const scope = sessionStore.scope(message.senderId, message.chatId);
+      const result = await naturalAgent.chat({ message: message.content, profile: identity,
+        runtimeSummary: { subject: '羊羊', access: 'read_only', dashboard }, history: await sessionStore.memory.history(scope) });
+      await send(result.text);
+      await sessionStore.memory.append(scope, { type: 'turn', eventId: message.messageId, user: message.content, assistant: result.text });
+    });
+  }
+
   channel.on('message', (message) => sessionStore.withMessage(message, async () => {
     if (message.chatType === 'group') {
       if (!config.groupChatEnabled || message.chatId !== config.testGroupId) return;
@@ -859,11 +892,13 @@ export async function startFeishuBot({
       queueModelReply(message.chatId, 'Group conversation', () => groupConversation(message));
       return;
     }
-    if (message.chatType !== 'p2p' || message.senderId !== config.testerOpenId) return;
+    if (message.chatType !== 'p2p' || !canReceivePrivate(message.senderId, config)) return;
+    const identity = identifySender(message.senderId, config);
     acknowledgeMessage(message.messageId);
     await sessionStore.rememberPrivateChat({ openId: message.senderId, chatId: message.chatId });
     const privateScope = sessionStore.scope(message.senderId, message.chatId);
     await sessionStore.memory.append(privateScope, { type: 'inbound', eventId: message.messageId, text: message.content, senderId: message.senderId });
+    if (message.content.trim() === '/身份') return channel.send(message.chatId, { text: identityDescription(identity, { chatType: 'p2p', openId: message.senderId, chatId: message.chatId }) });
     if (['/new', '/reset', '/重置上下文', '重置上下文', '清空上下文'].includes(message.content.trim())) {
       queueModelReply(message.chatId, 'Reset private session', async () => {
         const active = await sessionStore.getActive(message.senderId, message.chatId);
@@ -886,6 +921,7 @@ export async function startFeishuBot({
       return;
     }
 
+    if (identity.role !== 'learner') return handleNonLearner(message, identity);
     const command = commandFrom(message.content);
     if (command === 'today') return showToday(message.chatId);
     if (command === 'weaknesses') return showWeaknesses(message.chatId);
@@ -922,10 +958,13 @@ export async function startFeishuBot({
   }));
 
   channel.on('cardAction', async (event) => {
-    if (event.operator.openId !== config.testerOpenId) return;
+    if (!canReceivePrivate(event.operator.openId, config)) return;
     if (!await sessionStore.isKnownPrivateChat({ openId: event.operator.openId, chatId: event.chatId })) return;
     const value = actionValue(event.action.value);
     if (!value || value.v !== '1') return;
+    if (identifySender(event.operator.openId, config).role !== 'learner') {
+      return channel.send(event.chatId, { text: '当前账号不能操作羊羊的练习卡片。管理员请通过 /今日、/进度、/薄弱、/记录 查看数据。' });
+    }
     if (typeof value.sessionId === 'string') {
       const record = (await repository.read()).feishu?.sessions?.find(s => s.id === value.sessionId);
       if (!record || record.openId !== event.operator.openId || record.chatId !== event.chatId) return;
@@ -996,7 +1035,9 @@ export async function startFeishuBot({
   return {
     status: 'connected',
     transport: 'websocket',
-    privateTestMode: true,
+    privateTestMode: config.dmMode === 'allowlist',
+    dmMode: config.dmMode,
+    identityBindings: { learner: Boolean(config.learnerId), administrator: Boolean(config.ownerId) },
     groupConversation: config.groupChatEnabled ? { status: 'enabled', chatId: config.testGroupId } : { status: 'disabled' },
     groupCheckinTest: config.groupTestEnabled ? { status: 'armed', chatId: config.testGroupId } : { status: 'disabled' },
     naturalLanguage: naturalAgent.isConfigured() ? 'configured' : 'disabled',

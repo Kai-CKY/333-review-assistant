@@ -52,13 +52,15 @@ export function parseNaturalRating(content) {
   return null;
 }
 
-export function deterministicConversationReply(content) {
+export function deterministicConversationReply(content, role = 'learner') {
   const value = normalized(content).toLowerCase();
   if (['你好', '您好', '嗨', '哈喽', 'hello', 'hi', '在吗', '早上好', '中午好', '下午好', '晚上好'].includes(value)) {
+    if (role === 'admin') return '你好，我在。你可以查看羊羊的今日任务、学习进度和最近完成记录。';
+    if (role === 'unbound') return '你好，我是333复习助手。当前账号尚未绑定角色，可以发送 /身份 查看账号信息。';
     return '羊羊，我在。你可以告诉我今天完成了什么，或直接说“今天学什么”。';
   }
-  if (['谢谢', '谢谢你', '辛苦了'].includes(value)) return '不客气。今天哪怕只完成一个小闭环，也值得记下来。';
-  if (['收到', '好的', '好'].includes(value)) return '好，我在。完成一项后直接告诉我，我会替你记入复盘备案。';
+  if (['谢谢', '谢谢你', '辛苦了'].includes(value)) return role === 'learner' ? '不客气。今天哪怕只完成一个小闭环，也值得记下来。' : '不客气，我在。';
+  if (['收到', '好的', '好'].includes(value)) return role === 'learner' ? '好，我在。完成一项后直接告诉我，我会替你记入复盘备案。' : '好，我在。';
   return null;
 }
 

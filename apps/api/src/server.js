@@ -7,12 +7,14 @@ import { StudyService } from './study-service.js';
 import { startFeishuBot } from './feishu/bot.js';
 import { ArkFeedbackProvider } from './ark/feedback.js';
 import { ArkStudyAgent } from './ark/agent.js';
+import { createWebAuth } from './web-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../../web');
 const repository = new LocalRepository(process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : path.resolve(__dirname, '../../../.data/review-assistant.json'));
 const modelProvider = new ArkFeedbackProvider();
-const studyAgent = new ArkStudyAgent({ provider: modelProvider });
+const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
+const webAuth = createWebAuth();
 const studyService = new StudyService(repository, { modelProvider });
 const feedbackService = studyService.feedbackService;
 let startupFeedbackRecovery = { queuedJobIds: [], interruptedJobIds: [] };
@@ -25,8 +27,8 @@ try {
   console.warn('Feedback-job startup reconciliation is unavailable:', error.code ?? error.message);
 }
 const port = Number(process.env.PORT ?? 3333);
-// Default to loopback so an unconfigured cloud deployment cannot expose the
-// unauthenticated API to the public internet. Containers set HOST=0.0.0.0 and
+// Keep the backend private even with application authentication.
+// Containers set HOST=0.0.0.0 and
 // are published back to the host's loopback interface in compose.yaml.
 const host = process.env.HOST ?? '127.0.0.1';
 let feishuBotStatus = { status: 'not_started' };
@@ -40,27 +42,59 @@ const mimeTypes = {
 };
 
 const server = createServer(async (request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('Referrer-Policy', 'same-origin');
+  response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
+    if (request.method === 'GET' && url.pathname === '/api/health') return handleApi(request, response, url);
+    if (request.method === 'POST' && url.pathname === '/api/login') {
+      const retryAfter = webAuth.consumeAttempt(request);
+      if (retryAfter) {
+        response.setHeader('Retry-After', retryAfter);
+        return sendJson(response, 429, { error: '尝试过于频繁，请稍后重试。' });
+      }
+      if (!webAuth.validMutation(request)) return sendJson(response, 403, { error: '请从本站登录页面提交。' });
+      const result = await webAuth.login(await readJson(request));
+      if (result.cookie) response.setHeader('Set-Cookie', result.cookie);
+      if (result.retryAfter) response.setHeader('Retry-After', result.retryAfter);
+      return sendJson(response, result.status, result.error ? { error: result.error } : { user: result.user });
+    }
+    const session = webAuth.authenticate(request);
+    if (request.method === 'GET' && ['/login', '/login.html', '/login.js', '/styles.css'].includes(url.pathname)) {
+      if (session && ['/login', '/login.html'].includes(url.pathname)) return redirect(response, '/');
+      return await serveStatic(response, url.pathname === '/login' ? '/login.html' : url.pathname);
+    }
+    if (!session) {
+      if (url.pathname.startsWith('/api/')) return sendJson(response, 401, { error: '请先登录。' });
+      return redirect(response, '/login');
+    }
+    if (!['GET', 'HEAD'].includes(request.method) && !webAuth.validMutation(request)) {
+      return sendJson(response, 403, { error: '请从本站页面提交 JSON 请求。' });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/session') return sendJson(response, 200, { user: session.user, role: session.role });
+    if (request.method === 'POST' && url.pathname === '/api/logout') {
+      response.setHeader('Set-Cookie', webAuth.logout(request));
+      return sendJson(response, 200, { ok: true });
+    }
+    if (session.role === 'admin' && !['GET', 'HEAD'].includes(request.method)) {
+      return sendJson(response, 403, { error: '管理员仅查看羊羊的数据，不能代替她作答或自评。' });
+    }
     if (url.pathname.startsWith('/api/')) {
       await handleApi(request, response, url);
       return;
     }
     await serveStatic(response, url.pathname);
   } catch (error) {
-    console.error(error);
-    sendJson(response, 500, { error: error.message || 'internal server error' });
+    console.error('HTTP request failed:', error.statusCode || 'internal_error');
+    sendJson(response, error.statusCode || 500, { error: error.statusCode ? error.message : '请求失败，请稍后重试。' });
   }
 });
 
 async function handleApi(request, response, url) {
   if (request.method === 'GET' && url.pathname === '/api/health') {
-    return sendJson(response, 200, {
-      status: 'ok',
-      storage: 'local-json',
-      model: { provider: 'ark', status: studyService.isModelConfigured() ? 'configured' : 'not_configured' },
-      feishu: feishuBotStatus
-    });
+    return sendJson(response, 200, { status: 'ok' });
   }
 
   if (request.method === 'GET' && url.pathname === '/api/dashboard') {
@@ -69,9 +103,13 @@ async function handleApi(request, response, url) {
 
   if (request.method === 'GET' && url.pathname === '/api/knowledge-points') {
     const data = await repository.read();
-    return sendJson(response, 200, data.knowledgePoints.map((point) => ({
+    return sendJson(response, 200, data.knowledgePoints.filter(point => !point.archived && !point.hidden).map((point) => ({
       ...point,
-      state: data.reviewStates.find((item) => item.knowledgePointId === point.id) ?? null
+      state: data.reviewStates.find((item) => item.knowledgePointId === point.id) ?? null,
+      timeline: [
+        ...data.memoryEvents.filter(event => event.knowledgePointId === point.id),
+        ...data.reviewLogs.filter(log => log.knowledgePointId === point.id).map(log => ({ type: 'review', on: log.reviewedOn, rating: log.rating, nextReviewOn: log.nextReviewOn }))
+      ].sort((a, b) => a.on.localeCompare(b.on))
     })));
   }
 
@@ -113,19 +151,28 @@ async function handleApi(request, response, url) {
 
 async function readJson(request) {
   let raw = '';
-  for await (const chunk of request) raw += chunk;
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > 65536) throw Object.assign(new Error('请求内容过大。'), { statusCode: 413 });
+    chunks.push(chunk);
+  }
+  raw = Buffer.concat(chunks).toString('utf8');
   try {
-    return raw ? JSON.parse(raw) : {};
+    const body = raw ? JSON.parse(raw) : {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('invalid body');
+    return body;
   } catch {
-    throw new Error('invalid JSON body');
+    throw Object.assign(new Error('请求必须是 JSON 对象。'), { statusCode: 400 });
   }
 }
 
 async function serveStatic(response, pathname) {
   const requestedPath = pathname === '/' ? '/index.html' : pathname;
-  const safePath = path.normalize(requestedPath).replace(/^([.][.][/\\])+/, '');
-  const filePath = path.join(webRoot, safePath);
-  if (!filePath.startsWith(webRoot)) return sendJson(response, 403, { error: 'forbidden' });
+  const filePath = path.resolve(webRoot, `.${decodeURIComponent(requestedPath)}`);
+  const relative = path.relative(webRoot, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return sendJson(response, 403, { error: 'forbidden' });
   try {
     const content = await readFile(filePath);
     response.writeHead(200, { 'content-type': mimeTypes[path.extname(filePath)] ?? 'application/octet-stream' });
@@ -139,6 +186,11 @@ async function serveStatic(response, pathname) {
 function sendJson(response, status, payload) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
+}
+
+function redirect(response, location) {
+  response.writeHead(303, { location });
+  response.end();
 }
 
 server.listen(port, host, () => {

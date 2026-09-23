@@ -1,4 +1,5 @@
 import { answerFeedbackSystemPrompt } from '../agent/prompts.js';
+import { knowledgeContextRule } from '../knowledge/library.js';
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const DEFAULT_MODEL_ID = 'doubao-seed-2-1-turbo-260628';
@@ -38,6 +39,7 @@ function userPrompt({ task, answer }) {
   return [
     `知识点：${clip(task?.title, 300) || '未命名知识点'}`,
     `回忆题：${clip(task?.prompt, 1_500) || '未提供'}`,
+    ...(task?.reference ? [`入库参考数据：${JSON.stringify(task.reference)}`] : []),
     `用户回忆：${clip(answer, MAX_ANSWER_CHARS)}`
   ].join('\n\n');
 }
@@ -148,7 +150,7 @@ export class ArkFeedbackProvider {
     if (!text(answer)) throw new ArkFeedbackError('invalid_answer');
     const result = await this.complete({
       messages: [
-        { role: 'system', content: answerFeedbackSystemPrompt(profile) },
+        { role: 'system', content: `${answerFeedbackSystemPrompt(profile)}\n${knowledgeContextRule}` },
         { role: 'user', content: userPrompt({ task, answer }) }
       ]
     });

@@ -30,8 +30,9 @@ function invalidFeedbackError() {
 function defaultSourceSnapshot(channel, task) {
   return {
     channel: optionalText(channel) ?? 'unknown',
-    evidenceStatus: 'unverified_demo_material',
-    sourceChunkIds: [],
+    evidenceStatus: task?.reference?.evidenceStatus || 'unverified_demo_material',
+    sourceChunkIds: task?.reference ? [`${task.reference.documentId}:${task.reference.itemId}:v${task.reference.version}`] : [],
+    ...(task?.reference ? { reference: snapshot(task.reference) } : {}),
     task: {
       id: task?.id ?? null,
       knowledgePointId: task?.knowledgePointId ?? null,
