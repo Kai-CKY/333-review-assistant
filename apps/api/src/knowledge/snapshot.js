@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, rename, readdir, lstat, access } from 'node
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { conversationScope } from '../agent/memory.js';
+import { libraryPolicy, syncSavedKnowledge } from './library.js';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const validHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -33,8 +34,11 @@ async function archiveFiles(directory) {
 
 // An atomic database read plus immutable, content-addressed blobs. The manifest
 // is replaced last, so a failed export cannot invalidate the previous snapshot.
-export async function exportKnowledge({ databaseFile, outputDir }) {
+export async function exportKnowledge({ databaseFile, outputDir, knowledgePolicy = libraryPolicy() }) {
   const data = JSON.parse(await readFile(databaseFile, 'utf8'));
+  // Materialize the Web/agent view in this copy only; do not mutate the live DB.
+  data.knowledgePoints ??= [];
+  syncSavedKnowledge(data, knowledgePolicy);
   const root = path.dirname(path.resolve(databaseFile));
   const photoKnowledge = structuredClone(data.photoKnowledge || { schemaVersion: 1, drafts: {}, documents: {}, events: [] });
   const scopes = {};
@@ -69,7 +73,7 @@ export async function exportKnowledge({ databaseFile, outputDir }) {
   const temporary = within(outputDir, `manifest-${randomUUID()}.tmp`);
   await writeFile(temporary, JSON.stringify(manifest, null, 2), { mode: 0o600 });
   await rename(temporary, within(outputDir, 'manifest.json'));
-  return { documents: Object.keys(photoKnowledge.documents).length, drafts: Object.keys(photoKnowledge.drafts).length, files: files.length, bytes: files.reduce((n, f) => n + f.bytes, 0) };
+  return { documents: Object.keys(photoKnowledge.documents).length, drafts: Object.keys(photoKnowledge.drafts).length, visibleSavedPoints: data.knowledgePoints.filter(p => p.sourceKind === 'saved_knowledge' && !p.archived && !p.hidden).length, files: files.length, bytes: files.reduce((n, f) => n + f.bytes, 0) };
 }
 
 // Cold restore only: never merge a stale Git snapshot over a live cloud database.

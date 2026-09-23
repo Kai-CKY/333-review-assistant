@@ -24,7 +24,7 @@
 npm run knowledge:export
 ```
 
-默认读取`.data/review-assistant.json`；自定义数据路径时通过进程环境`DATA_FILE`，或参数`--database`指定。脚本不会自动加载`.env.local`。示例：
+默认读取`.data/review-assistant.json`；自定义数据路径时通过进程环境`DATA_FILE`，或参数`--database`指定。`npm run knowledge:export`现在加载本机`.env.local`，按配置的知识共享范围生成网站/Agent知识投影；它只更新快照，不写运行库。直接执行脚本则使用已有进程环境。示例：
 
 ```text
 npm run knowledge:export -- --database /data/review-assistant.json
@@ -97,6 +97,8 @@ npm run knowledge:restore -- --database /data/review-assistant.json
 有入库资料时隐藏演示题库（不删除旧记录）。按用户已确认规则，原上传日代表发现遗忘，当天建立待复习；首次学习的具体日期保持未知。历史存档按原草稿时间兼容迁移，无时间戳的不猜测；后续修订不重置排程。详见 [学习流程](LEARNING-FLOW-PROPOSAL.md)。这项同步连接的是当前实例运行库中的入库资料，不会自动拉取其他电脑或 GitHub 上更新的快照；云端已有库的跨实例合并仍需专门迁移，不能覆盖恢复。
 
 这里的“自动更新”发生在**同一个运行数据库**内。云端和本机仍是两份库；Git 快照不会覆盖云端已有数据。若已入库内容只存在本机，需要另行执行安全的数据迁移，不能通过 `knowledge:restore` 覆盖线上学习记录。
+
+2026-09-23已新增 `knowledge:merge`：默认预览，在目标停服后使用`--apply --server-stopped`向已有运行库增加缺少的已保存知识，保留线上新版本、学习和会话记录，冲突则不写入。参见[线上知识更新操作单](SERVER-KNOWLEDGE-UPDATE-2026-09-23.md)。
 
 ## 本次验证（2026-09-18）
 

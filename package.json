@@ -17,8 +17,9 @@
     "ark:configure": "node scripts/configure-ark.mjs",
     "ark:verify": "node --env-file=.env.local scripts/verify-ark.mjs",
     "knowledge:verify": "node --env-file=.env.local scripts/verify-photo-knowledge.mjs",
-    "knowledge:export": "node scripts/knowledge-snapshot.mjs export",
-    "knowledge:restore": "node scripts/knowledge-snapshot.mjs restore"
+    "knowledge:export": "node --env-file=.env.local scripts/knowledge-snapshot.mjs export",
+    "knowledge:restore": "node scripts/knowledge-snapshot.mjs restore",
+    "knowledge:merge": "node scripts/knowledge-snapshot.mjs merge"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.3",
