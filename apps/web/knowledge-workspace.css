@@ -1,0 +1,27 @@
+.knowledge-search { display:grid; gap:8px; margin:22px 0 8px; font-size:14px; }
+.knowledge-search > div,.inline-search { display:flex; gap:8px; }
+.knowledge-workspace input:not([type=checkbox]),.knowledge-search input,.knowledge-workspace select { min-width:0; width:100%; padding:10px; border:1px solid var(--line); color:var(--ink); background:var(--paper); font:inherit; }
+.knowledge-workspace { display:grid; grid-template-columns:240px minmax(0,1fr); border-top:1px solid var(--line); margin-top:18px; }
+.knowledge-catalog { padding:12px 16px 12px 0; max-height:950px; overflow:auto; border-right:1px solid var(--line); }
+.point-choice { display:grid; gap:7px; width:100%; padding:14px 10px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; }
+.point-choice strong { line-height:1.65; font-size:14px; }.point-choice span { color:var(--muted); font-size:12px; line-height:1.6; max-height:100px; overflow:auto; }
+.point-choice:hover,.point-choice.selected { background:var(--blue-pale); }.point-choice.selected { box-shadow:inset 3px 0 var(--blue); }
+.knowledge-canvas { min-width:0; padding:20px; }.local-graph { background:var(--paper-blue); border:1px solid var(--line); position:relative; }
+.local-graph svg { display:block; width:100%; min-height:260px; }.local-graph line { stroke:var(--line); stroke-width:2; }
+.local-graph text { text-anchor:middle; fill:var(--ink); font-size:13px; font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
+.local-graph .edge-label { fill:var(--muted); font-size:11px; }.graph-node { cursor:pointer; }.graph-node circle { fill:var(--blue-pale); stroke:var(--blue); stroke-width:2; }
+.graph-node.center circle { fill:var(--ink); stroke:var(--orange); stroke-width:3; }.graph-node:hover circle,.graph-node:focus circle { stroke:var(--orange); stroke-width:4; }
+.local-graph .node-state { font-size:10px; fill:var(--muted); }.graph-empty { margin:0; padding:0 20px 20px; color:var(--muted); font-size:13px; line-height:1.7; }
+.graph-neighbors { display:flex; flex-wrap:wrap; gap:8px; padding:12px; }.point-heading h3 { font:600 26px/1.5 "Songti SC",STSong,serif; margin:8px 0; }.point-heading { margin:28px 0 16px; }
+.source-panel { padding:16px 0; border-top:1px solid var(--line); }.source-panel summary { cursor:pointer; font-weight:600; line-height:1.8; }.source-panel .knowledge-text { margin-top:18px; max-height:480px; overflow:auto; }
+.source-panel blockquote { margin:16px 0; padding:10px 16px; border-left:3px solid var(--blue); background:var(--paper-blue); white-space:pre-wrap; font-size:14px; }
+.answer-item-editor { display:grid; gap:12px; margin:20px 0; padding:16px; background:var(--paper-blue); border:1px solid var(--line); }.answer-item-editor label { display:grid; gap:8px; font-size:13px; }
+.answer-item-editor textarea { width:100%; padding:10px; border:1px solid var(--line); background:white; color:var(--ink); resize:vertical; }.review-check { display:flex; align-items:center; gap:8px; margin:18px 0; font-size:14px; }
+[data-relation] { display:grid; gap:10px; margin-top:12px; }#answer-feedback { border-left:3px solid var(--done); padding:16px; margin:16px 0; background:var(--done-pale); }
+@media(max-width:1000px) { .knowledge-workspace { grid-template-columns:190px minmax(0,1fr); }.knowledge-canvas { padding:14px; } }
+@media(max-width:700px) { .knowledge-workspace { grid-template-columns:1fr; }.knowledge-catalog { max-height:230px; border-right:0; border-bottom:1px solid var(--line); padding-right:0; }.knowledge-canvas { padding:14px 0; }.local-graph svg { min-height:220px; }.inline-search { flex-wrap:wrap; } }
+.knowledge-filters { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }
+.knowledge-filters label { display: grid; gap: 6px; min-width: 180px; }
+.knowledge-search button, .inline-search button { white-space: nowrap; flex-shrink: 0; min-width: 64px; }
+.knowledge-search input, .inline-search input { min-width: 0; }
+.knowledge-filters select { font: inherit; max-width: 100%; padding: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }

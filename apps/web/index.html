@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#f6f3ec" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/knowledge-workspace.css" />
     <title>333 · 回忆工作台</title>
   </head>
   <body>
@@ -31,14 +32,6 @@
         <div id="status" class="status" role="status"></div>
         <section id="dashboard" class="dashboard" aria-live="polite"></section>
         <section id="knowledge" class="knowledge-index" aria-labelledby="knowledge-title"></section>
-        <section class="knowledge-index" aria-labelledby="pdf-title">
-          <h2 id="pdf-title">导入 PDF 资料</h2>
-          <p class="help-text">每份最多 10 MB、30 页。解析后请逐页核对；确认后以待核验资料入库，并按上传日进入复习列表。</p>
-          <form id="pdf-upload"><label for="pdf-file">选择 PDF</label> <input id="pdf-file" type="file" accept="application/pdf,.pdf" required /> <button class="secondary" type="submit">上传并解析</button></form>
-          <p id="pdf-status" role="status" class="help-text"></p>
-          <button id="pdf-refresh" class="secondary" type="button">刷新解析进度</button>
-          <div id="pdf-jobs"></div>
-        </section>
       </section>
     </main>
     <dialog id="review-dialog" class="review-dialog">
@@ -52,6 +45,7 @@
         <p class="help-text">作答会保存在服务器。模型提示不会替你选择自评。</p>
         <p id="dialog-status" class="help-text" role="status"></p>
         <div id="answer-reference" class="knowledge-text" hidden></div>
+        <div id="answer-feedback" class="knowledge-text" hidden aria-live="polite"></div>
         <div class="dialog-actions"><button id="save-answer" class="secondary" type="button">保存作答</button></div>
         <fieldset class="rating"><legend>这次回忆得怎么样？</legend><div>
           <button type="button" data-rating="again" class="rating-again">完全想不起来</button>
@@ -62,6 +56,6 @@
       </form>
     </dialog>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/pdf-import.js"></script>
+    <script type="module" src="/knowledge-workspace.js"></script>
   </body>
 </html>

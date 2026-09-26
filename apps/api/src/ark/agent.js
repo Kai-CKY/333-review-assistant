@@ -1,5 +1,7 @@
 import { ArkFeedbackError, ArkFeedbackProvider } from './feedback.js';
-import { searchSavedItems, knowledgeContextRule } from '../knowledge/library.js';
+import { knowledgeContextRule } from '../knowledge/library.js';
+import { KnowledgeTools } from '../agent/knowledge-tools.js';
+import { compactRuntime, coachingReference } from '../agent/context-builder.js';
 import {
   coachingSystemPrompt,
   conversationSystemPrompt,
@@ -53,9 +55,9 @@ function validateRoute(route) {
 }
 
 function historyMessages(history = []) {
-  return history.slice(-8).flatMap((turn) => [
-    { role: 'user', content: clip(turn.user, 1_200) },
-    { role: 'assistant', content: clip(turn.assistant, 1_200) }
+  return history.slice(-6).flatMap((turn) => [
+    { role: 'user', content: clip(turn.user, 600) },
+    { role: 'assistant', content: clip(turn.assistant, 600) }
   ]).filter((item) => item.content);
 }
 
@@ -63,12 +65,12 @@ export class ArkStudyAgent {
   constructor({ provider = new ArkFeedbackProvider(), repository = null } = {}) {
     this.provider = provider;
     this.repository = repository;
+    this.knowledgeTools = repository ? new KnowledgeTools(repository) : null;
   }
 
   async knowledge(message, profile) {
     if (!this.repository || profile?.role === 'unbound') return [];
-    const data = await this.repository.read();
-    return searchSavedItems(data.knowledgePoints.filter(p => p.sourceKind === 'saved_knowledge' && !p.archived), message);
+    return (await this.knowledgeTools.searchKnowledge(message)).hits;
   }
 
   isConfigured() {
@@ -87,7 +89,7 @@ export class ArkStudyAgent {
             message: clip(message, 2_000),
             saved_knowledge: await this.knowledge(message, profile),
             active_session: activeSession ? { status: activeSession.status, task_title: activeSession.task?.title } : null,
-            runtime_summary: runtimeSummary,
+            runtime_summary: compactRuntime(runtimeSummary || {}),
             recent_conversation: history.slice(-4).map((turn) => ({
               user: clip(turn.user, 600),
               assistant: clip(turn.assistant, 600)
@@ -104,7 +106,7 @@ export class ArkStudyAgent {
       temperature: 0.35,
       maxTokens: 260,
       messages: [
-        { role: 'system', content: `${conversationSystemPrompt(profile, runtimeSummary)}\n${knowledgeContextRule}` },
+        { role: 'system', content: `${conversationSystemPrompt(profile, compactRuntime(runtimeSummary || {}))}\n${knowledgeContextRule}` },
         ...historyMessages(history),
         { role: 'user', content: JSON.stringify({ saved_knowledge: await this.knowledge(message, profile) }) },
         { role: 'user', content: clip(message, 3_000) }
@@ -125,7 +127,7 @@ export class ArkStudyAgent {
           content: [
             `当前知识点：${clip(task?.title, 300)}`,
             `当前回忆题：${clip(task?.prompt, 1_500)}`,
-            `已入库参考：${JSON.stringify(task?.reference || await this.knowledge(task?.title || message, profile))}`,
+            `本题绑定参考：${JSON.stringify(coachingReference(task?.reference))}`,
             `羊羊的问题：${clip(message, 2_000)}`
           ].join('\n\n')
         }

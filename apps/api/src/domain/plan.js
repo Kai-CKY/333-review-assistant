@@ -1,3 +1,5 @@
+import { taskForPoint } from '../knowledge/references.js';
+
 export function buildTodayPlan({ knowledgePoints, reviewStates, targetDate, maximumTasks = 5 }) {
   const states = new Map(reviewStates.map((state) => [state.knowledgePointId, state]));
   const points = knowledgePoints.map((point) => ({ ...point, state: states.get(point.id) }));
@@ -21,19 +23,5 @@ export function buildTodayPlan({ knowledgePoints, reviewStates, targetDate, maxi
 }
 
 function toTask(point, type, label) {
-  return {
-    id: `${type}:${point.id}`,
-    knowledgePointId: point.id,
-    type,
-    label,
-    title: point.title,
-    prompt: point.recallPrompt,
-    estimatedMinutes: type === 'learn' ? 12 : 7,
-    mastery: point.state?.mastery ?? 0.2,
-    source: point.sourceLabel,
-    ...(point.sourceKind === 'saved_knowledge' ? { reference: {
-      text: point.text, evidenceStatus: point.evidenceStatus, citations: point.citations,
-      documentId: point.sourceDocumentId, itemId: point.sourceItemId, version: point.sourceVersion
-    } } : {})
-  };
+  return taskForPoint(point, point.state, { type, label });
 }

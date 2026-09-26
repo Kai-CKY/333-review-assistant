@@ -2,23 +2,23 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LocalRepository } from './repository.js';
+import { openRepository } from './storage/open-repository.js';
 import { StudyService } from './study-service.js';
 import { startFeishuBot } from './feishu/bot.js';
 import { ArkFeedbackProvider } from './ark/feedback.js';
 import { ArkStudyAgent } from './ark/agent.js';
 import { createWebAuth } from './web-auth.js';
-import { PdfImportService, pdfScope, MAX_PDF_BYTES } from './knowledge/pdf-import.js';
+import { KnowledgeWorkspace } from './knowledge/workspace-service.js';
+import { readKnowledgePage } from './knowledge/source-pages.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../../web');
-const repository = new LocalRepository(process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : path.resolve(__dirname, '../../../.data/review-assistant.json'));
+const repository = await openRepository(process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : path.resolve(__dirname, '../../../.data/review-assistant.json'));
 const modelProvider = new ArkFeedbackProvider();
 const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
 const webAuth = createWebAuth();
 const studyService = new StudyService(repository, { modelProvider });
-const pdfImports = new PdfImportService({ repository });
-await pdfImports.reconcile();
+const knowledgeWorkspace = new KnowledgeWorkspace(repository);
 const feedbackService = studyService.feedbackService;
 let startupFeedbackRecovery = { queuedJobIds: [], interruptedJobIds: [] };
 try {
@@ -77,41 +77,52 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 403, { error: '请从本站页面提交 JSON 请求。' });
     }
     if (request.method === 'GET' && url.pathname === '/api/session') return sendJson(response, 200, { user: session.user, role: session.role });
+    const sourcePage = url.pathname.match(/^\/api\/knowledge-sources\/(KP-[a-f0-9]{8})\/pages\/([1-9][0-9]{0,5})$/);
+    if (request.method === 'GET' && sourcePage) {
+      const { bytes, mime } = await readKnowledgePage(repository, sourcePage[1], Number(sourcePage[2]), { withType: true });
+      response.writeHead(200, { 'Content-Type': mime, 'Content-Disposition': `inline; filename="${sourcePage[1]}.${mime === 'application/pdf' ? 'pdf' : 'jpg'}"` });
+      return response.end(bytes);
+    }
     if (request.method === 'POST' && url.pathname === '/api/logout') {
       response.setHeader('Set-Cookie', webAuth.logout(request));
       return sendJson(response, 200, { ok: true });
     }
-    if (session.role === 'admin' && !['GET', 'HEAD'].includes(request.method)) {
+    if (url.pathname === '/api/pdf-imports' || url.pathname.startsWith('/api/pdf-imports/')) {
+      return sendJson(response, 410, { error: 'PDF 已改为离线解析。请在本地核对后导入资料；已入库教材仍可从知识索引查看原文。' });
+    }
+    const materialWrite = url.pathname === '/api/knowledge-v2/search' ||
+      /^\/api\/knowledge-v2\/points\/[^/]+\/(answer-reviews|relations)$/.test(url.pathname);
+    if (session.role === 'admin' && !['GET', 'HEAD'].includes(request.method) && !(request.method === 'POST' && materialWrite)) {
       return sendJson(response, 403, { error: '管理员仅查看羊羊的数据，不能代替她作答或自评。' });
     }
-    if (url.pathname.startsWith('/api/pdf-imports')) {
-      const scope = pdfScope();
-      if (request.method === 'GET' && url.pathname === '/api/pdf-imports') return sendJson(response, 200, { parser: await pdfImports.parser.health(), jobs: await pdfImports.list(scope) });
-      if (request.method === 'POST' && url.pathname === '/api/pdf-imports') {
-        const body = await readJson(request, Math.ceil(MAX_PDF_BYTES * 4 / 3) + 4096);
-        if (typeof body.base64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.base64)) return sendJson(response, 400, { error: 'PDF 编码无效。' });
-        const job = await pdfImports.submit(scope, { filename: body.filename, bytes: Buffer.from(body.base64, 'base64'), actor: `web:${session.user}` });
-        return sendJson(response, 202, job);
+    const actor = { id: `web:${session.user}`, role: session.role };
+    if (url.pathname.startsWith('/api/knowledge-v2/')) {
+      const route = url.pathname.slice('/api/knowledge-v2'.length);
+      if (request.method === 'GET' && route === '/sources') return sendJson(response, 200, await knowledgeWorkspace.sources());
+      if (request.method === 'GET' && route === '/points') return sendJson(response, 200, await knowledgeWorkspace.list(Object.fromEntries(url.searchParams)));
+      if (request.method === 'POST' && route === '/search') {
+        const input = await readJson(request);
+        return sendJson(response, 200, await knowledgeWorkspace.search(input.query, { textbookOnly: input.textbookOnly === true, limit: input.limit }));
       }
-      const match = url.pathname.match(/^\/api\/pdf-imports\/(KP-[a-f0-9]{8})(?:\/(source|confirm))?$/);
+      if (request.method === 'POST' && route === '/spot-checks') return sendJson(response, 200, await knowledgeWorkspace.spotCheck(actor));
+      const match = route.match(/^\/points\/([^/]+)(?:\/(graph|excerpt|answer-reviews|enrollment|relations))?$/);
       if (match) {
-        const job = await pdfImports.get(scope, match[1]);
-        if (request.method === 'GET' && !match[2]) return sendJson(response, 200, job);
-        if (request.method === 'GET' && match[2] === 'source') {
-          const bytes = await readFile(path.join(pdfImports.root, job.id, 'source.pdf'));
-          response.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="source.pdf"' });
-          return response.end(bytes);
-        }
-        if (request.method === 'POST' && match[2] === 'confirm') {
-          const body = await readJson(request);
-          if (body.reviewed !== true) return sendJson(response, 400, { error: '请先核对原文并确认待核验存档。' });
-          return sendJson(response, 200, await pdfImports.confirm(scope, job.id, `web:${session.user}`));
-        }
+        const id = decodeURIComponent(match[1]), action = match[2];
+        if (request.method === 'GET' && !action) return sendJson(response, 200, await knowledgeWorkspace.get(id));
+        if (request.method === 'GET' && action === 'graph') return sendJson(response, 200, await knowledgeWorkspace.graph(id));
+        if (request.method === 'GET' && action === 'excerpt') return sendJson(response, 200, await knowledgeWorkspace.excerpt(id, url.searchParams.has('version') ? url.searchParams.get('version') : undefined));
+        if (request.method === 'POST' && action === 'answer-reviews') return sendJson(response, 200, await knowledgeWorkspace.reviewAnswer(id, await readJson(request, 1048576), actor));
+        if (request.method === 'POST' && action === 'enrollment') return sendJson(response, 200, await knowledgeWorkspace.enroll(id, actor));
+        if (request.method === 'POST' && action === 'relations') return sendJson(response, 200, await knowledgeWorkspace.addRelation(id, await readJson(request), actor));
       }
       return sendJson(response, 404, { error: 'route not found' });
     }
+    if (request.method === 'POST' && url.pathname === '/api/practice-sessions') {
+      const input = await readJson(request);
+      return sendJson(response, 201, await studyService.startPractice(input.knowledgePointId, actor.id));
+    }
     if (url.pathname.startsWith('/api/')) {
-      await handleApi(request, response, url);
+      await handleApi(request, response, url, actor);
       return;
     }
     await serveStatic(response, url.pathname);
@@ -121,7 +132,7 @@ const server = createServer(async (request, response) => {
   }
 });
 
-async function handleApi(request, response, url) {
+async function handleApi(request, response, url, actor) {
   if (request.method === 'GET' && url.pathname === '/api/health') {
     return sendJson(response, 200, { status: 'ok' });
   }
@@ -150,8 +161,11 @@ async function handleApi(request, response, url) {
 
   if (request.method === 'POST' && url.pathname === '/api/answer-attempts') {
     const body = await readJson(request);
-    const attempt = await studyService.saveAnswer(body);
-    const task = await studyService.getPracticeTask(attempt.knowledgePointId);
+    const session = body.practiceSessionId ? await studyService.practiceSession(body.practiceSessionId, actor.id, body.knowledgePointId) : null;
+    const selectedTask = session?.task || await studyService.getPracticeTask(body.knowledgePointId);
+    const attempt = await studyService.saveAnswer({ knowledgePointId: body.knowledgePointId, content: body.content,
+      sourceId: body.sourceId, practiceSessionId: session?.id, taskSnapshot: selectedTask });
+    const task = attempt.taskSnapshot || selectedTask;
     const queued = await feedbackService.enqueue({
       attempt,
       task,
@@ -164,7 +178,7 @@ async function handleApi(request, response, url) {
     return sendJson(response, 202, {
       attempt,
       job: queued.job,
-      message: '答案已保存，正在生成结构性提示；它不会自动改变自评或复习排程。'
+      message: '答案已保存，正在生成反馈；它不会自动改变自评或复习排程。'
     });
   }
 
@@ -231,7 +245,7 @@ server.listen(port, host, () => {
     void feedbackService.processQueued(startupFeedbackRecovery.queuedJobIds)
       .catch((error) => console.warn('Recovered feedback jobs could not be processed:', error.code ?? error.message));
   }
-  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, pdfImports, logger: console })
+  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, logger: console })
     .then((result) => { feishuBotStatus = result; })
     .catch((error) => {
       feishuBotStatus = { status: 'error', message: error.message };

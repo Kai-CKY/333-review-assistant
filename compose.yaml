@@ -10,7 +10,6 @@ services:
       PORT: "3333"
       HOST: 0.0.0.0
       DATA_FILE: /data/review-assistant.json
-      PDF_PARSER_URL: ${PDF_PARSER_URL:-}
     # Do not make the unauthenticated API public. Access it through an SSH
     # tunnel until application-level authentication is implemented.
     ports:
@@ -27,26 +26,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-  pdf-parser:
-    profiles: [pdf]
-    build:
-      context: .
-      dockerfile: apps/pdf-parser/Dockerfile
-    restart: unless-stopped
-    init: true
-    environment:
-      MINERU_MODEL_SOURCE: ${MINERU_MODEL_SOURCE:-modelscope}
-    volumes:
-      - mineru-models:/models
-    # Private Compose network only. Never publish the parser port to the host.
-    mem_limit: 8g
-    cpus: 2
-    healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-volumes:
-  mineru-models:

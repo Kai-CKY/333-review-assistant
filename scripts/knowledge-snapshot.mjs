@@ -11,7 +11,7 @@ try {
   if (action === 'export') result = await exportKnowledge({ databaseFile, outputDir: snapshotDir });
   else if (action === 'merge') {
     if (!value('--database') && !process.env.DATA_FILE) throw new Error('Specify the existing target database with --database or DATA_FILE.');
-    result = await mergeKnowledge({ snapshotDir, databaseFile, apply: args.includes('--apply'), serverStopped: args.includes('--server-stopped') });
+    result = await mergeKnowledge({ snapshotDir, databaseFile, apply: args.includes('--apply'), serverStopped: args.includes('--server-stopped'), allowStructuredUpgrade: args.includes('--allow-structured-upgrade') });
     if (result.conflicts.length) process.exitCode = 2;
   }
   else if (action === 'restore') {

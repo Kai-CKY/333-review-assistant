@@ -131,7 +131,6 @@ export async function startFeishuBot({
   feedbackService = null,
   modelProvider = null,
   studyAgent = null,
-  pdfImports = null,
   channelFactory = lark.createLarkChannel,
   logger = console,
   groupPollIntervalMs = GROUP_TEST_POLL_MS
@@ -186,7 +185,7 @@ export async function startFeishuBot({
   const groupConversation = createGroupConversation({
     repository, provider: feedbackProvider, channel, chatId: config.testGroupId,
     yangyangOpenId: config.learnerId, ownerOpenId: config.ownerId, logger,
-    appId: config.appId, knowledgeService, pdfImports
+    appId: config.appId, knowledgeService
   });
   const receiptReactionAvailable = typeof channel.addReaction === 'function';
   let receiptReactionFailureLogged = false;
@@ -557,6 +556,7 @@ export async function startFeishuBot({
       const attempt = await studyService.saveAnswer({
         knowledgePointId: claim.session.task.knowledgePointId,
         content: answer,
+        taskSnapshot: claim.session.task,
         sourceId: claim.session.answerSourceId
       });
       const completed = await sessionStore.finishAnswer({

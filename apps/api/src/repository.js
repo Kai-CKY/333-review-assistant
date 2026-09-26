@@ -107,7 +107,7 @@ function synchronizeJobBackedAnswerFeedback(feedback, job, now) {
   if (job.failedAt) feedback.failedAt = job.failedAt;
 }
 
-function normalizeData(data) {
+export function normalizeData(data) {
   let changed = false;
   if (data.schemaVersion !== 4) {
     data.schemaVersion = 4;
@@ -197,6 +197,7 @@ export class LocalRepository {
       if (!knowledgePoint || knowledgePoint.archived || knowledgePoint.hidden || knowledgePoint.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
       const duplicate = sourceId && data.reviewLogs.find((item) => item.sourceId === sourceId);
       if (duplicate) {
+        if (duplicate.knowledgePointId !== knowledgePointId) throw Object.assign(new Error('该自评请求已用于另一知识点。'), { statusCode: 409 });
         return {
           knowledgePoint,
           state: data.reviewStates.find((item) => item.knowledgePointId === knowledgePointId),
@@ -225,18 +226,22 @@ export class LocalRepository {
     });
   }
 
-  async saveAnswer({ knowledgePointId, content, submittedOn = todayKey(), sourceId, feedbackStatus = 'not_requested' }) {
+  async saveAnswer({ knowledgePointId, content, submittedOn = todayKey(), sourceId, feedbackStatus = 'not_requested', taskSnapshot = null, practiceSessionId = null }) {
     return this.mutate((data) => {
       const point = data.knowledgePoints.find(item => item.id === knowledgePointId);
       if (!point || point.archived || point.hidden || point.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
       const duplicate = sourceId && data.answerAttempts.find((item) => item.sourceId === sourceId);
-      if (duplicate) return { ...duplicate, idempotent: true };
+      if (duplicate) {
+        if (duplicate.knowledgePointId !== knowledgePointId) throw Object.assign(new Error('答案标识已用于另一知识点。'), { statusCode: 409 });
+        return { ...duplicate, idempotent: true };
+      }
       const attempt = {
         id: `answer-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         knowledgePointId,
         content: content.trim(),
         submittedOn,
         feedbackStatus,
+        taskSnapshot: cloneValue(taskSnapshot), practiceSessionId,
         ...(sourceId ? { sourceId } : {})
       };
       data.answerAttempts.push(attempt);
@@ -327,6 +332,7 @@ export class LocalRepository {
   async completeFeedbackJob({
     jobId,
     feedback,
+    details = null,
     provider,
     modelVersion,
     promptVersion,
@@ -356,6 +362,7 @@ export class LocalRepository {
       const answerFeedback = ensureJobBackedAnswerFeedback(data, job, now);
       synchronizeJobBackedAnswerFeedback(answerFeedback, job, now);
       answerFeedback.feedback = cloneValue(feedback);
+      answerFeedback.details = cloneValue(details);
       attempt.feedbackStatus = 'succeeded';
       return {
         job: cloneValue(job),
@@ -541,7 +548,7 @@ export class LocalRepository {
   }
 }
 
-function createSeedData() {
+export function createSeedData() {
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const pastDate = todayKey(yesterday);
   return {

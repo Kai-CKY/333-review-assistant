@@ -28,10 +28,11 @@ function invalidFeedbackError() {
 }
 
 function defaultSourceSnapshot(channel, task) {
+  const answer = task?.reference?.answer;
   return {
     channel: optionalText(channel) ?? 'unknown',
-    evidenceStatus: task?.reference?.evidenceStatus || 'unverified_demo_material',
-    sourceChunkIds: task?.reference ? [`${task.reference.documentId}:${task.reference.itemId}:v${task.reference.version}`] : [],
+    evidenceStatus: answer?.status === 'reviewed' ? 'reviewed' : task?.reference?.evidenceStatus || 'unverified_demo_material',
+    sourceChunkIds: answer?.status === 'reviewed' ? answer.evidence.map(e => `${e.pointId}:v${e.version}`) : task?.reference ? [`${task.reference.documentId}:${task.reference.itemId}:v${task.reference.version}`] : [],
     ...(task?.reference ? { reference: snapshot(task.reference) } : {}),
     task: {
       id: task?.id ?? null,
@@ -78,6 +79,7 @@ export class FeedbackService {
   async enqueue({ attempt, task, idempotencyKey, sourceSnapshot, channel } = {}) {
     if (!attempt?.id) throw new Error('attempt.id is required');
     if (!task || typeof task !== 'object') throw new Error('task is required');
+    if (attempt.knowledgePointId !== task.knowledgePointId) throw new Error('answer_task_mismatch');
     if (!text(idempotencyKey)) throw new Error('idempotencyKey is required');
 
     return this.repository.createFeedbackJob({
@@ -85,7 +87,7 @@ export class FeedbackService {
       idempotencyKey: text(idempotencyKey),
       provider: this.providerName,
       modelVersion: this.modelVersion(),
-      promptVersion: this.promptVersion,
+      promptVersion: task.reference?.answer?.status === 'reviewed' ? 'reviewed-reference-v1' : this.promptVersion,
       // A caller with retrieved, reviewed evidence can provide its own
       // snapshot. Until then every channel gets the same explicit demo-mode
       // snapshot, rather than maintaining duplicate helpers at each adapter.
@@ -127,6 +129,7 @@ export class FeedbackService {
       return await this.repository.completeFeedbackJob({
         jobId: claim.job.id,
         feedback: result.feedback,
+        details: result.details || null,
         ...this.metadataFor(claim.job, result.modelId)
       });
     } catch (error) {

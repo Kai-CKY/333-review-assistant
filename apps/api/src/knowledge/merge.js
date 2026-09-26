@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { restoreKnowledge } from './snapshot.js';
 import { libraryPolicy, syncSavedKnowledge } from './library.js';
+import { readDatabaseFile, isSqliteFile } from '../storage/database-file.js';
+import { SqliteRepository } from '../storage/sqlite-repository.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const canonical = value => JSON.stringify(value, (_k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -11,10 +13,11 @@ async function exists(file) { try { await access(file); return true; } catch (e)
 
 // Add missing saved documents only. Existing source conflicts require separate
 // review; an old Git snapshot is never allowed to overwrite a cloud revision.
-export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false, serverStopped = false, knowledgePolicy = libraryPolicy() }) {
+export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false, serverStopped = false, allowStructuredUpgrade = false, knowledgePolicy = libraryPolicy() }) {
   if (apply && !serverStopped) throw new Error('stop_server_and_pass_server_stopped');
-  const original = await readFile(databaseFile);
-  const data = JSON.parse(original);
+  const data = await readDatabaseFile(databaseFile);
+  const original = Buffer.from(JSON.stringify(data));
+  const unchanged = async () => digest(Buffer.from(JSON.stringify(await readDatabaseFile(databaseFile)))) === digest(original);
   const stage = await mkdtemp(path.join(tmpdir(), '333-knowledge-merge-'));
   const stagedDatabase = path.join(stage, 'data.json');
   await restoreKnowledge({ snapshotDir, databaseFile: stagedDatabase });
@@ -24,7 +27,7 @@ export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false,
   data.photoKnowledge ??= { schemaVersion: 1, documents: {}, drafts: {}, events: [] };
   data.agentMemory ??= { version: 1, streams: {}, sessions: {}, notes: {} };
   const store = data.photoKnowledge, memory = data.agentMemory;
-  const result = { added: [], unchanged: [], retainedNewer: [], conflicts: [], visibleSavedPoints: 0, applied: false };
+  const result = { added: [], upgraded: [], unchanged: [], retainedNewer: [], conflicts: [], visibleSavedPoints: 0, applied: false };
   const included = new Set(), assets = new Set();
   for (const [id, doc] of Object.entries(incoming.photoKnowledge.documents)) {
     const revision = doc.revisions.find(r => r.version === doc.currentVersion);
@@ -34,8 +37,21 @@ export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false,
       if (existing.scopeKey !== doc.scopeKey) { result.conflicts.push({ id, reason: 'scope_conflict' }); continue; }
       if (existing.currentVersion > doc.currentVersion) { result.retainedNewer.push(id); continue; }
       const current = existing.revisions.find(r => r.version === existing.currentVersion);
-      if (existing.currentVersion !== doc.currentVersion || canonical(current) !== canonical(revision)) { result.conflicts.push({ id, reason: 'revision_conflict' }); continue; }
-      result.unchanged.push(id);
+      const upgrade = doc.materialKind === 'textbook' && existing.materialKind !== 'textbook' && doc.currentVersion === existing.currentVersion + 1
+        && doc.upgradesLegacy?.version === existing.currentVersion && /^[a-f0-9]{64}$/.test(doc.upgradesLegacy?.contentHash || '')
+        && doc.upgradesLegacy.contentHash === current?.contentHash;
+      if (upgrade && allowStructuredUpgrade) {
+        const draft = incoming.photoKnowledge.drafts[revision.sourceDraftId || id], previous = store.drafts[revision.sourceDraftId || id];
+        if (!draft || draft.scopeKey !== doc.scopeKey || (previous && previous.scopeKey !== doc.scopeKey)) { result.conflicts.push({ id, reason: 'missing_or_wrong_scope_draft' }); continue; }
+        store.documents[id] = { ...structuredClone(doc), createdAt: existing.createdAt, revisions: [...existing.revisions, structuredClone(revision)] };
+        store.drafts[draft.id] = { ...structuredClone(draft), ...(previous ? { sessionId: previous.sessionId, versions: [...(previous.versions || []), ...draft.versions] } : {}) };
+        store.drafts[draft.id].importProvenance.archiveDir = path.join(root, 'knowledge-library', draft.id);
+        store.events.push(...incoming.photoKnowledge.events.filter(e => e.id === id));
+        result.upgraded.push(id);
+      } else {
+        if (existing.currentVersion !== doc.currentVersion || canonical(current) !== canonical(revision)) { result.conflicts.push({ id, reason: upgrade ? 'structured_upgrade_requires_flag' : 'revision_conflict' }); continue; }
+        result.unchanged.push(id);
+      }
     } else {
       const sourceDraftId = revision.sourceDraftId || id;
       if (store.drafts[sourceDraftId]) { result.conflicts.push({ id, reason: 'draft_id_conflict' }); continue; }
@@ -70,6 +86,20 @@ export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false,
   }
   data.knowledgePoints ??= [];
   syncSavedKnowledge(data, knowledgePolicy);
+  if (incoming.knowledgeV2) {
+    data.knowledgeV2 ??= { answers: {}, enrollments: {}, relations: [], audit: [] };
+    for (const [id, answers] of Object.entries(incoming.knowledgeV2.answers)) {
+      const old = data.knowledgeV2.answers[id];
+      if (!old?.length) data.knowledgeV2.answers[id] = answers;
+      else if (canonical(old) !== canonical(answers)) result.conflicts.push({ id, reason: 'reviewed_answer_conflict' });
+    }
+    for (const relation of incoming.knowledgeV2.relations) {
+      const old = data.knowledgeV2.relations.find(r => r.id === relation.id);
+      if (!old) data.knowledgeV2.relations.push(relation);
+      else if (canonical(old) !== canonical(relation)) result.conflicts.push({ id: relation.id, reason: 'knowledge_relation_conflict' });
+    }
+    syncSavedKnowledge(data, knowledgePolicy);
+  }
   const visible = data.knowledgePoints.filter(p => p.sourceKind === 'saved_knowledge' && !p.archived && !p.hidden);
   result.visibleSavedPoints = visible.length;
   for (const id of included) if (!visible.some(p => p.sourceDocumentId === id)) result.conflicts.push({ id, reason: 'not_visible_under_server_scope_policy' });
@@ -94,7 +124,7 @@ export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false,
   const lockFile = `${databaseFile}.knowledge-merge.lock`;
   const lock = await open(lockFile, 'wx', 0o600);
   try {
-    if (digest(await readFile(databaseFile)) !== digest(original)) throw new Error('database_changed_during_merge');
+    if (!await unchanged()) throw new Error('database_changed_during_merge');
     const backup = path.join(root, 'backups', `before-knowledge-merge-${Date.now()}-${randomUUID()}.json`);
     await mkdir(path.dirname(backup), { recursive: true });
     await writeFile(backup, original, { flag: 'wx', mode: 0o600 });
@@ -102,11 +132,15 @@ export async function mergeKnowledge({ snapshotDir, databaseFile, apply = false,
       await mkdir(path.dirname(file.target), { recursive: true });
       await copyFile(file.from, file.target, 1); // COPYFILE_EXCL
     }
-    store.events.push({ type: 'knowledge_snapshot_merged', at: new Date().toISOString(), snapshotExportedAt: snapshot.exportedAt, added: result.added, unchanged: result.unchanged, retainedNewer: result.retainedNewer });
+    store.events.push({ type: 'knowledge_snapshot_merged', at: new Date().toISOString(), snapshotExportedAt: snapshot.exportedAt, added: result.added, upgraded: result.upgraded, unchanged: result.unchanged, retainedNewer: result.retainedNewer });
     const temporary = `${databaseFile}.${randomUUID()}.tmp`;
     await writeFile(temporary, JSON.stringify(data, null, 2), { mode: 0o600 });
-    if (digest(await readFile(databaseFile)) !== digest(original)) throw new Error('database_changed_during_merge');
-    await rename(temporary, databaseFile);
+    if (!await unchanged()) throw new Error('database_changed_during_merge');
+    if (isSqliteFile(databaseFile)) {
+      const repository = new SqliteRepository(databaseFile, { knowledgePolicy });
+      try { await repository.save(data); } finally { repository.close(); }
+      const { unlink } = await import('node:fs/promises'); await unlink(temporary);
+    } else await rename(temporary, databaseFile);
     result.applied = true; result.backup = backup;
     return result;
   } finally {

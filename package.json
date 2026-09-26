@@ -19,10 +19,15 @@
     "knowledge:verify": "node --env-file=.env.local scripts/verify-photo-knowledge.mjs",
     "knowledge:export": "node --env-file=.env.local scripts/knowledge-snapshot.mjs export",
     "knowledge:restore": "node scripts/knowledge-snapshot.mjs restore",
-    "knowledge:merge": "node scripts/knowledge-snapshot.mjs merge"
+    "knowledge:merge": "node scripts/knowledge-snapshot.mjs merge",
+    "knowledge:migrate": "node scripts/migrate-knowledge-v2.mjs",
+    "knowledge:evaluate": "node scripts/evaluate-retrieval.mjs",
+    "runtime:backup": "node scripts/runtime-backup.mjs backup",
+    "runtime:restore": "node scripts/runtime-backup.mjs restore"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.3",
+    "better-sqlite3": "12.4.1",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0"
   }

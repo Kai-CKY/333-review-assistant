@@ -3,8 +3,11 @@
 ## 当前阶段
 
 - CI 已启用：推送到 `main`、Pull Request 和手动触发都会安装锁定依赖、运行测试并构建 Docker 镜像。
-- CD 暂不自动化：服务器继续使用 `git pull --ff-only` 和 `docker compose up -d --build` 手动发布。
+- CD 暂不自动化：服务器手动发布通过 CI 的准确提交。仅在分支未分叉、工作区干净时使用 `git pull --ff-only`；发生过回滚时先按本次发布操作单核对状态。
 - CI 不加载 `.env.local`，不接触飞书、模型或服务器密钥，也不会产生真实消息或付费模型调用。
+- PDF 解析已改为离线，默认 CI 不构建 MinerU、不下载 OCR 模型。CI 增加轻量检索回归；生产镜像仅包含学习应用。
+- 镜像构建后，在容器里分别使用临时 JSON 和 SQLite 启动应用，验证健康检查、登录、知识接口与 PDF 撤回边界，检查 Alpine 的原生 SQLite 依赖可运行。
+- 本次知识库版本的回滚衔接、提交边界与发布步骤见 [知识库 V2 发布操作单](RELEASE-KNOWLEDGE-V2-OFFLINE-PDF.md)。本地等价检查与 GitHub Actions 远端结果分别记录。
 
 ## 为什么暂不自动发布
 
@@ -17,7 +20,7 @@
 1. 本地 `npm test` 通过。
 2. 推送代码并等待 GitHub Actions 的 `CI` 工作流成功。
 3. 备份服务器 `runtime-data/review-assistant.json`。
-4. 在服务器执行：
+4. 确认服务器分支可快进、工作区干净且完成备份后，在服务器执行；回滚过的环境优先采用本次发布操作单中的明确 SHA 流程：
 
    ```bash
    git pull --ff-only

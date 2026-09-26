@@ -1,0 +1,25 @@
+{
+  "kind": "synthetic_regression",
+  "description": "仅用于程序回归，不代表真实教材或模型准确率。",
+  "points": [
+    { "id": "p1", "title": "教学原则", "text": "直观性原则要求把感性经验与理性认识结合。", "sourceScopeKey": "class-a", "materialKind": "textbook" },
+    { "id": "p2", "title": "心理学第二章", "text": "动机可以激发和维持活动。", "sourceScopeKey": "class-a", "materialKind": "textbook" },
+    { "id": "p3", "title": "赫尔巴特", "text": "这里是用于检索人名的测试资料，不用于学习。", "sourceScopeKey": "class-a", "materialKind": "textbook" },
+    { "id": "p4", "title": "个人笔记", "text": "动机的概念仍需复习。", "sourceScopeKey": "class-a", "materialKind": "photo" },
+    { "id": "p5", "title": "外部范围", "text": "范围外的唯一术语望远镜。", "sourceScopeKey": "class-b", "materialKind": "textbook" },
+    { "id": "p6", "title": "已撤销资料", "text": "禁止返回的唯一词条铅笔盒。", "sourceScopeKey": "class-a", "archived": true },
+    { "id": "p7", "title": "正文末尾术语", "text": "alpha beta gamma delta epsilon zeta theta lambda sigma omega sample title words testing stable search context chunk scope library footer pedagogical", "sourceScopeKey": "class-a", "materialKind": "textbook" }
+  ],
+  "cases": [
+    { "query": "教学原则", "expectedIds": ["p1"], "scopeKey": "class-a" },
+    { "query": "直观性", "expectedIds": ["p1"], "scopeKey": "class-a" },
+    { "query": "感性经验", "expectedIds": ["p1"], "scopeKey": "class-a" },
+    { "query": "什么是动机", "expectedIds": ["p2"], "scopeKey": "class-a", "textbookOnly": true },
+    { "query": "动机", "expectedIds": ["p2"], "scopeKey": "class-a", "textbookOnly": true },
+    { "query": "赫尔巴特", "expectedIds": ["p3"], "scopeKey": "class-a" },
+    { "query": "pedagogical", "expectedIds": ["p7"], "scopeKey": "class-a" },
+    { "query": "望远镜", "noMatch": true, "scopeKey": "class-a" },
+    { "query": "铅笔盒", "noMatch": true, "scopeKey": "class-a" },
+    { "query": "海底火山", "noMatch": true, "scopeKey": "class-a" }
+  ]
+}
