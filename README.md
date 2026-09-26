@@ -68,6 +68,8 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ## 当前边界
 
+PDF 支持独立 MinerU 解析服务：网页上传或配置群发送 PDF，逐页核对后以待核验资料确认入库。部署时需启用 `pdf` Compose profile 并配置 `PDF_PARSER_URL`；默认关闭。支持范围、资源要求、真实引擎测试及上线命令见 [启用 PDF 解析](docs/ENABLE-PDF-PARSER.md)。
+
 - 演示知识点只用于验证系统流程，不是最终的 333 权威题库。
 - 当前调度器为可测试的四档间隔策略；接入 `ts-fsrs` 后会保留相同的调用接口。
 - 未导入资料时仍显示演示知识点；真实资料以核验状态决定是否可练习，模型不冒充标准答案或评分。

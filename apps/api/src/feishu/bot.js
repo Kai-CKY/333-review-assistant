@@ -131,6 +131,7 @@ export async function startFeishuBot({
   feedbackService = null,
   modelProvider = null,
   studyAgent = null,
+  pdfImports = null,
   channelFactory = lark.createLarkChannel,
   logger = console,
   groupPollIntervalMs = GROUP_TEST_POLL_MS
@@ -185,7 +186,7 @@ export async function startFeishuBot({
   const groupConversation = createGroupConversation({
     repository, provider: feedbackProvider, channel, chatId: config.testGroupId,
     yangyangOpenId: config.learnerId, ownerOpenId: config.ownerId, logger,
-    appId: config.appId, knowledgeService
+    appId: config.appId, knowledgeService, pdfImports
   });
   const receiptReactionAvailable = typeof channel.addReaction === 'function';
   let receiptReactionFailureLogged = false;
@@ -885,8 +886,8 @@ export async function startFeishuBot({
       if (!config.groupChatEnabled || message.chatId !== config.testGroupId) return;
       if (!message.senderId || message.senderId === channel.botIdentity?.openId) return;
       acknowledgeMessage(message.messageId);
-      if (!['text', 'post', 'image'].includes(message.rawContentType)) {
-        await channel.send(message.chatId, { text: '可以发送文字、图片或图文消息；暂不支持语音和文件附件。' }, { replyTo: message.messageId });
+      if (!['text', 'post', 'image', 'file'].includes(message.rawContentType)) {
+        await channel.send(message.chatId, { text: '可以发送文字、图片、图文或 PDF 附件；暂不支持语音和其他文件。' }, { replyTo: message.messageId });
         return;
       }
       queueModelReply(message.chatId, 'Group conversation', () => groupConversation(message));

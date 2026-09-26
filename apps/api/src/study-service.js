@@ -56,7 +56,7 @@ export class StudyService {
       recentTaskCompletions,
       weakPoints,
       system: {
-        pdfParser: 'not_configured',
+        pdfParser: process.env.PDF_PARSER_URL ? 'mineru_configured' : 'not_configured',
         modelProvider: this.isModelConfigured() ? 'configured' : 'not_configured',
         scheduler: 'mvp_adapter',
         dataMode: data.knowledgePoints.some(point => point.sourceKind === 'saved_knowledge' && !point.archived) ? 'saved' : 'demo'

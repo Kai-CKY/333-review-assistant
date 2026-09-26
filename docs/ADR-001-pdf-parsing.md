@@ -3,6 +3,8 @@
 **状态**：已采纳  
 **日期**：2026-08-26
 
+**实施更新（2026-09-26）**：已接入独立 MinerU 3.4.5 pipeline 服务，网页和配置群支持 PDF 上传、原件保存、逐页预览与人工确认。当前以待核验参考资料入库；未实现下文规划的 PaddleOCR 自动回退或事实审核评级。部署默认关闭，见 [上线说明](ENABLE-PDF-PARSER.md)。
+
 ## 决策
 
 使用 **MinerU 3.x 本地 `pipeline` 后端**作为首选解析器；通过 `DocumentParser` 接口封装，并以 **PaddleOCR 的 PP-StructureV3 / PaddleOCR-VL** 作为问题页回退方案。

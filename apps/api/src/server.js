@@ -8,6 +8,7 @@ import { startFeishuBot } from './feishu/bot.js';
 import { ArkFeedbackProvider } from './ark/feedback.js';
 import { ArkStudyAgent } from './ark/agent.js';
 import { createWebAuth } from './web-auth.js';
+import { PdfImportService, pdfScope, MAX_PDF_BYTES } from './knowledge/pdf-import.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../../web');
@@ -16,6 +17,8 @@ const modelProvider = new ArkFeedbackProvider();
 const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
 const webAuth = createWebAuth();
 const studyService = new StudyService(repository, { modelProvider });
+const pdfImports = new PdfImportService({ repository });
+await pdfImports.reconcile();
 const feedbackService = studyService.feedbackService;
 let startupFeedbackRecovery = { queuedJobIds: [], interruptedJobIds: [] };
 try {
@@ -80,6 +83,32 @@ const server = createServer(async (request, response) => {
     }
     if (session.role === 'admin' && !['GET', 'HEAD'].includes(request.method)) {
       return sendJson(response, 403, { error: '管理员仅查看羊羊的数据，不能代替她作答或自评。' });
+    }
+    if (url.pathname.startsWith('/api/pdf-imports')) {
+      const scope = pdfScope();
+      if (request.method === 'GET' && url.pathname === '/api/pdf-imports') return sendJson(response, 200, { parser: await pdfImports.parser.health(), jobs: await pdfImports.list(scope) });
+      if (request.method === 'POST' && url.pathname === '/api/pdf-imports') {
+        const body = await readJson(request, Math.ceil(MAX_PDF_BYTES * 4 / 3) + 4096);
+        if (typeof body.base64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.base64)) return sendJson(response, 400, { error: 'PDF 编码无效。' });
+        const job = await pdfImports.submit(scope, { filename: body.filename, bytes: Buffer.from(body.base64, 'base64'), actor: `web:${session.user}` });
+        return sendJson(response, 202, job);
+      }
+      const match = url.pathname.match(/^\/api\/pdf-imports\/(KP-[a-f0-9]{8})(?:\/(source|confirm))?$/);
+      if (match) {
+        const job = await pdfImports.get(scope, match[1]);
+        if (request.method === 'GET' && !match[2]) return sendJson(response, 200, job);
+        if (request.method === 'GET' && match[2] === 'source') {
+          const bytes = await readFile(path.join(pdfImports.root, job.id, 'source.pdf'));
+          response.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="source.pdf"' });
+          return response.end(bytes);
+        }
+        if (request.method === 'POST' && match[2] === 'confirm') {
+          const body = await readJson(request);
+          if (body.reviewed !== true) return sendJson(response, 400, { error: '请先核对原文并确认待核验存档。' });
+          return sendJson(response, 200, await pdfImports.confirm(scope, job.id, `web:${session.user}`));
+        }
+      }
+      return sendJson(response, 404, { error: 'route not found' });
     }
     if (url.pathname.startsWith('/api/')) {
       await handleApi(request, response, url);
@@ -149,13 +178,13 @@ async function handleApi(request, response, url) {
   return sendJson(response, 404, { error: 'route not found' });
 }
 
-async function readJson(request) {
+async function readJson(request, limit = 65536) {
   let raw = '';
   let size = 0;
   const chunks = [];
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 65536) throw Object.assign(new Error('请求内容过大。'), { statusCode: 413 });
+    if (size > limit) throw Object.assign(new Error('请求内容过大。'), { statusCode: 413 });
     chunks.push(chunk);
   }
   raw = Buffer.concat(chunks).toString('utf8');
@@ -202,7 +231,7 @@ server.listen(port, host, () => {
     void feedbackService.processQueued(startupFeedbackRecovery.queuedJobIds)
       .catch((error) => console.warn('Recovered feedback jobs could not be processed:', error.code ?? error.message));
   }
-  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, logger: console })
+  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, pdfImports, logger: console })
     .then((result) => { feishuBotStatus = result; })
     .catch((error) => {
       feishuBotStatus = { status: 'error', message: error.message };

@@ -37,3 +37,15 @@ jobs:
 
       - name: Build deployment image
         run: docker build --tag 333-review-assistant:ci .
+
+  pdf-parser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build pinned CPU parser
+        run: docker build -f apps/pdf-parser/Dockerfile -t 333-pdf-parser:ci .
+      - name: Parser normalization and input limits
+        run: docker run --rm -v "$PWD/apps/pdf-parser/test_worker.py:/worker/test_worker.py:ro" 333-pdf-parser:ci python -m unittest test_worker
+      - name: Real text and scanned PDF smoke test
+        run: docker run --rm -e MINERU_MODEL_SOURCE=huggingface 333-pdf-parser:ci python smoke.py
