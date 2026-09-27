@@ -118,10 +118,23 @@ function render(data) {
   document.querySelectorAll('[data-task]').forEach((button) => button.addEventListener('click', () => openTask(button.dataset.task)));
 }
 
-function openTask(taskId) {
+async function openTask(taskId) {
   if (state.role === 'admin') return showStatus('管理员可查看羊羊的任务和记忆时间线；作答、自评由羊羊完成。', 'success');
   const task = state.dashboard.tasks.find((item) => item.id === taskId);
   if (!task) return;
+  return openPoint(task.knowledgePointId);
+}
+
+async function openPoint(pointId) {
+  if (state.role === 'admin') return showStatus('作答与自评由羊羊完成。', 'warning');
+  if (state.opening) return;
+  state.opening = true;
+  let session;
+  try { session = await request('/api/practice-sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ knowledgePointId: pointId }) }); }
+  catch (e) { showStatus(e.message, 'warning'); return; }
+  finally { state.opening = false; }
+  const task = session.task;
+  state.practiceSessionId = session.id;
   // Do not let a completed request from the previously open task overwrite the
   // status message for this task.
   state.feedbackPollToken += 1;
@@ -131,6 +144,7 @@ function openTask(taskId) {
   state.answerSaving = false;
   document.querySelector('#dialog-status').textContent = '';
   document.querySelector('#answer-reference').hidden = true;
+  document.querySelector('#answer-feedback').hidden = true;
   answer.value = '';
   document.querySelector('#task-label').textContent = task.label;
   document.querySelector('#task-title').textContent = task.title;
@@ -149,6 +163,7 @@ async function saveAnswer() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         knowledgePointId: state.activeTask.knowledgePointId,
+        practiceSessionId: state.practiceSessionId,
         content: answer.value,
         sourceId: state.answerSourceId ?? (state.answerSourceId = newAnswerSourceId())
       })
@@ -158,7 +173,13 @@ async function saveAnswer() {
     const reference = result.job?.taskSnapshot?.reference;
     if (reference?.text) {
       const container = document.querySelector('#answer-reference');
-      container.textContent = `${['supported', 'corrected'].includes(reference.evidenceStatus) ? '入库参考要点' : '待核验资料，仅供参考，不是标准答案'}\n${reference.text}`;
+      const approved = reference.answer?.status === 'reviewed';
+      container.textContent = `${approved ? '已核对的参考答案' : '待核验资料，仅供参考，不是标准答案'}\n${approved ? reference.answer.items.map(i => `${i.text}（依据 ${i.evidenceIds.join('、')}）`).join('\n') : reference.text}`;
+      const sources = approved ? reference.answer.evidence : [{ sourceAnchors: reference.sourceAnchors }];
+      for (const source of sources) {
+        if (source.quote) { const quote = document.createElement('blockquote'); quote.textContent = `${source.id} · ${source.title}\n${source.quote}`; container.append(quote); }
+        for (const a of source.sourceAnchors || []) { const link = document.createElement('a'); link.textContent = ` 查看 PDF 第 ${a.pdfPage} 页`; link.href = a.pageUrl; link.target = '_blank'; link.rel = 'noopener'; container.append(link); }
+      }
       container.hidden = false;
     }
     showStatus(result.message, 'success');
@@ -196,11 +217,13 @@ async function pollFeedbackJob(jobId) {
       if (token !== state.feedbackPollToken) return;
       if (job?.status === 'succeeded') {
         const feedback = feedbackText(result);
-        showStatus(feedback ? `结构提示：${feedback.replace(/\s*\n\s*/g, ' · ')}` : '结构提示已生成。', 'success', 12_000);
+        const feedbackPanel = document.querySelector('#answer-feedback');
+        if (feedbackPanel) { feedbackPanel.textContent = feedback || '反馈已生成。'; feedbackPanel.hidden = false; }
+        showStatus('反馈已生成。请结合参考依据，自评这次回忆。', 'success', 6_000);
         return;
       }
       if (job?.status === 'failed') {
-        showStatus('结构提示暂时无法生成，但答案、自评和复习安排都已保留。', 'warning', 8_000);
+        showStatus('模型反馈暂时不可用，作答已保存。你可以查看参考，再选择自评。', 'warning', 8_000);
         return;
       }
     } catch (error) {
@@ -245,9 +268,8 @@ function showStatus(message, kind, duration = 3_600) {
 async function loadDashboard() {
   try {
     if (!state.role) state.role = (await request('/api/session')).role;
-    const [data, points] = await Promise.all([request('/api/dashboard'), request('/api/knowledge-points')]);
+    const data = await request('/api/dashboard');
     render(data);
-    renderKnowledge(points);
     if (state.role === 'admin') {
       document.querySelectorAll('[data-task], [data-practice]').forEach(button => { button.disabled = true; button.textContent = '管理员只读'; });
     }
@@ -255,12 +277,25 @@ async function loadDashboard() {
   catch (error) { showStatus(`无法加载本地数据：${error.message}`, 'warning'); }
 }
 
+function renderKnowledgeEntry(point) {
+  const textbook = point.materialKind === 'textbook';
+  const statusLabel = textbook
+    ? ({ agent_visual_checked: '已对照原页抽核，仍待人工确认', machine_checked: '机器结构核对通过，待人工确认', needs_review: '结构有疑点，请查看原页' }[point.structureStatus] || '教材参考，待核对')
+    : ['supported', 'corrected'].includes(point.evidenceStatus) ? '有来源支持' : '待核验，仅供参考';
+  const anchors = [...new Map((point.sourceAnchors || []).map(a => [a.pdfPage, a])).values()];
+  const links = anchors.filter(a => /^KP-[a-f0-9]{8}$/.test(a.documentId) && Number.isSafeInteger(a.pdfPage) && a.pdfPage > 0)
+    .map(a => `<a href="/api/knowledge-sources/${a.documentId}/pages/${a.pdfPage}" target="_blank" rel="noopener">查看 PDF 第 ${a.pdfPage} 页原图</a>`).join(' · ');
+  const notes = textbook ? `<p class="help-text">教材参考，不代表已学习或遗忘，不自动加入复习。</p>${(point.qualityIssues || []).length ? `<p class="help-text">待核对：${escapeHtml(point.qualityIssues.join('；'))}</p>` : ''}`
+    : `<p class="help-text">以前学过；${escapeHtml(point.forgottenOn ? `${point.forgottenOn} 上传时发现遗忘` : '上传日期待确认')}。${escapeHtml(point.state?.nextReviewOn ? `下次复习：${point.state.nextReviewOn}` : '')}</p><ol class="memory-timeline" aria-label="记忆时间线">${(point.timeline || []).map(event => `<li><time>${escapeHtml(event.on)}</time> · ${escapeHtml(event.type === 'forgotten_upload' ? '发现遗忘，当日待复习' : `完成回忆：${({ again: '没想起来', hard: '很吃力', good: '基本掌握', easy: '很轻松' })[event.rating]}；下次 ${event.nextReviewOn}`)}</li>`).join('')}</ol>`;
+  return `<details class="knowledge-entry"><summary><strong>${escapeHtml(point.title)}</strong><span>${statusLabel}</span></summary><p class="help-text">${escapeHtml(point.sourceTitle)}${point.topicPath?.length ? ' · '+escapeHtml(point.topicPath.join(' / ')) : ''}</p>${links ? `<p>${links}</p>` : ''}<div class="knowledge-text">${escapeHtml(point.text)}</div>${notes}${point.practiceEligible ? `<button type="button" class="secondary" data-practice="${escapeHtml(point.id)}">开始回忆</button>` : textbook ? '' : '<p class="help-text">上传日期待确认，暂不自动排程。</p>'}</details>`;
+}
+
 function renderKnowledge(points) {
   const expanded = new Set([...document.querySelectorAll('#knowledge details[open]')].map(item => item.dataset.point));
   const saved = points.filter(point => point.sourceKind === 'saved_knowledge');
   const container = document.querySelector('#knowledge');
   container.innerHTML = `<div class="section-heading"><div><p class="eyebrow">已入库资料</p><h2 id="knowledge-title">知识索引</h2></div><span class="help-text">${saved.length} 个知识点 · 每 30 秒更新</span></div>` +
-    (saved.length ? saved.map(point => `<details class="knowledge-entry"><summary><strong>${escapeHtml(point.title)}</strong><span>${['supported', 'corrected'].includes(point.evidenceStatus) ? '有来源支持' : '待核验，仅供参考'}</span></summary><p class="help-text">${escapeHtml(point.sourceTitle)}</p><div class="knowledge-text">${escapeHtml(point.text)}</div><p class="help-text">以前学过；${escapeHtml(point.forgottenOn ? `${point.forgottenOn} 上传时发现遗忘` : '上传日期待确认')}。${escapeHtml(point.state?.nextReviewOn ? `下次复习：${point.state.nextReviewOn}` : '')}</p><ol class="memory-timeline" aria-label="记忆时间线">${(point.timeline || []).map(event => `<li><time>${escapeHtml(event.on)}</time> · ${escapeHtml(event.type === 'forgotten_upload' ? '发现遗忘，当日待复习' : `完成回忆：${({ again: '没想起来', hard: '很吃力', good: '基本掌握', easy: '很轻松' })[event.rating]}；下次 ${event.nextReviewOn}`)}</li>`).join('')}</ol>${point.practiceEligible ? `<button type="button" class="secondary" data-practice="${escapeHtml(point.id)}">开始回忆</button>` : '<p class="help-text">上传日期待确认，暂不自动排程。</p>'}</details>`).join('') : '<p class="empty">还没有可显示的入库资料。确认保存后会自动出现在这里。</p>');
+    (saved.length ? saved.map(renderKnowledgeEntry).join('') : '<p class="empty">还没有可显示的入库资料。确认保存后会自动出现在这里。</p>');
   container.querySelectorAll('[data-practice]').forEach(button => button.addEventListener('click', () => {
     const point = points.find(p => p.id === button.dataset.practice);
     const task = { id: `practice:${point.id}`, knowledgePointId: point.id, title: point.title, prompt: point.recallPrompt, label: '自主练习' };
@@ -281,6 +316,7 @@ const refresh = () => {
   if (!document.hidden && !dialog.open) void loadDashboard();
 };
 window.setInterval(refresh, 30000);
+window.addEventListener('practice-point', e => { void openPoint(e.detail).catch(error => showStatus(error.message, 'warning')); });
 window.addEventListener('focus', refresh);
 
 document.querySelector('#save-answer').addEventListener('click', () => saveAnswer().catch((error) => showStatus(error.message, 'warning')));

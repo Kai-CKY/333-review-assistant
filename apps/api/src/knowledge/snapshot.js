@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { conversationScope } from '../agent/memory.js';
 import { libraryPolicy, syncSavedKnowledge } from './library.js';
+import { readDatabaseFile, isSqliteFile } from '../storage/database-file.js';
+import { SqliteRepository } from '../storage/sqlite-repository.js';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const validHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -35,7 +37,7 @@ async function archiveFiles(directory) {
 // An atomic database read plus immutable, content-addressed blobs. The manifest
 // is replaced last, so a failed export cannot invalidate the previous snapshot.
 export async function exportKnowledge({ databaseFile, outputDir, knowledgePolicy = libraryPolicy() }) {
-  const data = JSON.parse(await readFile(databaseFile, 'utf8'));
+  const data = await readDatabaseFile(databaseFile);
   // Materialize the Web/agent view in this copy only; do not mutate the live DB.
   data.knowledgePoints ??= [];
   syncSavedKnowledge(data, knowledgePolicy);
@@ -68,7 +70,11 @@ export async function exportKnowledge({ databaseFile, outputDir, knowledgePolicy
     const directory = within(root, `knowledge-library/${id}`);
     for (const file of await archiveFiles(directory)) files.push({ path: path.relative(root, file).split(path.sep).join('/'), ...await writeBlob(outputDir, await readFile(file)) });
   }
-  const manifest = { format: '333-knowledge-snapshot', version: 1, exportedAt: new Date().toISOString(), photoKnowledge, knowledgePoints: structuredClone(data.knowledgePoints || []), scopes, files };
+  const structured = Object.values(photoKnowledge.documents).some(doc => doc.materialKind === 'textbook');
+  const knowledgeV2 = data.knowledgeV2 ? { answers: data.knowledgeV2.answers || {}, relations: data.knowledgeV2.relations || [] } : null;
+  const manifest = { format: '333-knowledge-snapshot', version: knowledgeV2 ? 3 : structured ? 2 : 1,
+    ...(knowledgeV2 ? { requiredFeatures: ['structured-textbook-v1', 'reviewed-answers-v1'], knowledgeV2 } : structured ? { requiredFeatures: ['structured-textbook-v1'] } : {}),
+    exportedAt: new Date().toISOString(), photoKnowledge, knowledgePoints: structuredClone(data.knowledgePoints || []), scopes, files };
   await mkdir(outputDir, { recursive: true });
   const temporary = within(outputDir, `manifest-${randomUUID()}.tmp`);
   await writeFile(temporary, JSON.stringify(manifest, null, 2), { mode: 0o600 });
@@ -80,7 +86,9 @@ export async function exportKnowledge({ databaseFile, outputDir, knowledgePolicy
 export async function restoreKnowledge({ snapshotDir, databaseFile }) {
   if (await exists(databaseFile)) throw new Error('destination_database_exists');
   const manifest = JSON.parse(await readFile(within(snapshotDir, 'manifest.json'), 'utf8'));
-  if (manifest.format !== '333-knowledge-snapshot' || manifest.version !== 1 || !manifest.photoKnowledge || !Array.isArray(manifest.files) || !Array.isArray(manifest.knowledgePoints)) throw new Error('invalid_snapshot');
+  if (manifest.format !== '333-knowledge-snapshot' || ![1, 2, 3].includes(manifest.version) || !manifest.photoKnowledge || !Array.isArray(manifest.files) || !Array.isArray(manifest.knowledgePoints)) throw new Error('invalid_snapshot');
+  if (manifest.version === 2 && (JSON.stringify(manifest.requiredFeatures) !== JSON.stringify(['structured-textbook-v1']))) throw new Error('unsupported_snapshot_features');
+  if (manifest.version === 3 && (JSON.stringify(manifest.requiredFeatures) !== JSON.stringify(['structured-textbook-v1', 'reviewed-answers-v1']) || !manifest.knowledgeV2?.answers || !Array.isArray(manifest.knowledgeV2.relations))) throw new Error('unsupported_snapshot_features');
   const root = path.dirname(path.resolve(databaseFile));
   const files = [];
   for (const item of manifest.files) {
@@ -90,7 +98,7 @@ export async function restoreKnowledge({ snapshotDir, databaseFile }) {
     if (hash(bytes) !== item.sha256 || bytes.length !== item.bytes) throw new Error('snapshot_blob_corrupt');
     if (item.path.startsWith('knowledge-assets/') && path.basename(item.path) !== item.sha256) throw new Error('asset_name_mismatch');
     // No writes before every referenced blob has been checked.
-    files.push({ target, bytes });
+    files.push({ target, blobFile: within(snapshotDir, `blobs/${item.sha256}`), sha256: item.sha256, size: item.bytes });
   }
   const photoKnowledge = structuredClone(manifest.photoKnowledge);
   const agentMemory = { version: 1, streams: {}, sessions: {}, notes: {} };
@@ -112,22 +120,28 @@ export async function restoreKnowledge({ snapshotDir, databaseFile }) {
     if (draft.importProvenance?.archiveDir) draft.importProvenance.archiveDir = within(root, `knowledge-library/${draft.id}`);
   }
   // Refuse symlink parents and conflicting files in the destination asset tree.
-  for (const { target, bytes } of files) {
+  for (const { target, sha256 } of files) {
     let directory = path.dirname(target);
     while (directory !== root) {
       if (await exists(directory) && (await lstat(directory)).isSymbolicLink()) throw new Error('destination_link_not_allowed');
       directory = path.dirname(directory);
     }
     if (await exists(target)) {
-      if ((await lstat(target)).isSymbolicLink() || hash(await readFile(target)) !== hash(bytes)) throw new Error('destination_file_conflict');
+      if ((await lstat(target)).isSymbolicLink() || hash(await readFile(target)) !== sha256) throw new Error('destination_file_conflict');
     }
   }
-  for (const { target, bytes } of files) {
+  for (const { target, blobFile, sha256, size } of files) {
+    const bytes = await readFile(blobFile);
+    if (hash(bytes) !== sha256 || bytes.length !== size) throw new Error('snapshot_blob_changed');
     await mkdir(path.dirname(target), { recursive: true });
     try { await writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
   }
   const data = { schemaVersion: 4, user: {}, knowledgePoints: manifest.knowledgePoints, reviewStates: [], reviewLogs: [], answerAttempts: [], answerFeedbacks: [], feedbackJobs: [], taskCompletionLogs: [], photoKnowledge, agentMemory };
+  if (manifest.knowledgeV2) data.knowledgeV2 = { ...manifest.knowledgeV2, enrollments: {}, audit: [] };
   await mkdir(root, { recursive: true });
-  await writeFile(databaseFile, JSON.stringify(data, null, 2), { flag: 'wx', mode: 0o600 });
+  if (isSqliteFile(databaseFile)) {
+    const repository = new SqliteRepository(databaseFile);
+    try { await repository.save(data); } finally { repository.close(); }
+  } else await writeFile(databaseFile, JSON.stringify(data, null, 2), { flag: 'wx', mode: 0o600 });
   return { documents: Object.keys(photoKnowledge.documents).length, drafts: Object.keys(photoKnowledge.drafts).length, files: files.length };
 }

@@ -2,6 +2,8 @@ import { todayKey } from './domain/date.js';
 import { buildTodayPlan } from './domain/plan.js';
 import { FeedbackService } from './feedback-service.js';
 import { activeStudyPoints } from './knowledge/library.js';
+import { taskForPoint, visiblePoint } from './knowledge/references.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Channel-neutral learning use cases. The browser API and the Feishu adapter
@@ -56,7 +58,7 @@ export class StudyService {
       recentTaskCompletions,
       weakPoints,
       system: {
-        pdfParser: process.env.PDF_PARSER_URL ? 'mineru_configured' : 'not_configured',
+        pdfParser: 'offline_only',
         modelProvider: this.isModelConfigured() ? 'configured' : 'not_configured',
         scheduler: 'mvp_adapter',
         dataMode: data.knowledgePoints.some(point => point.sourceKind === 'saved_knowledge' && !point.archived) ? 'saved' : 'demo'
@@ -76,25 +78,37 @@ export class StudyService {
   }
 
   async getPracticeTask(knowledgePointId, { type = 'practice', label = '自主练习' } = {}) {
+    if (this.repository.readPracticePoint) {
+      const { point, state } = await this.repository.readPracticePoint(knowledgePointId);
+      if (!point || point.practiceEligible === false) throw new Error('knowledge point not found');
+      return taskForPoint(point, state, { type, label });
+    }
     const data = await this.repository.read();
     const point = activeStudyPoints(data).find((item) => item.id === knowledgePointId);
     if (!point) throw new Error('knowledge point not found');
     const state = data.reviewStates.find((item) => item.knowledgePointId === knowledgePointId);
-    return {
-      id: `${type}:${point.id}`,
-      knowledgePointId: point.id,
-      type,
-      label,
-      title: point.title,
-      prompt: point.recallPrompt,
-      estimatedMinutes: 7,
-      mastery: state?.mastery ?? 0.2,
-      source: point.sourceLabel,
-      ...(point.sourceKind === 'saved_knowledge' ? { reference: {
-        text: point.text, evidenceStatus: point.evidenceStatus, citations: point.citations,
-        documentId: point.sourceDocumentId, itemId: point.sourceItemId, version: point.sourceVersion
-      } } : {})
-    };
+    return taskForPoint(point, state, { type, label });
+  }
+
+  async startPractice(pointId, owner) {
+    return this.repository.mutate(data => {
+      const point = visiblePoint(data, pointId);
+      if (point.practiceEligible === false) throw Object.assign(new Error('请先将此知识点加入学习范围。'), { statusCode: 409 });
+      const session = { id: randomUUID(), owner, createdAt: new Date().toISOString(),
+        task: taskForPoint(point, data.reviewStates.find(s => s.knowledgePointId === pointId)) };
+      (data.practiceSessions ??= {})[session.id] = session;
+      return structuredClone(session);
+    });
+  }
+
+  async practiceSession(id, owner, pointId) {
+    const data = await this.repository.read();
+    const session = data.practiceSessions?.[id];
+    if (!session || session.owner !== owner || session.task.knowledgePointId !== pointId) {
+      throw Object.assign(new Error('练习与知识点不匹配，请重新打开练习。'), { statusCode: 409 });
+    }
+    visiblePoint(data, pointId); // A stored session must never bypass revoked visibility.
+    return session;
   }
 
   async findPracticeTask(query) {

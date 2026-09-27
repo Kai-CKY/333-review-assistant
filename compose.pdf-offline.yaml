@@ -1,0 +1,17 @@
+# Development machine only. Never merged into the production Compose project.
+services:
+  pdf-parser:
+    build:
+      context: .
+      dockerfile: apps/pdf-parser/Dockerfile
+    init: true
+    environment:
+      MINERU_MODEL_SOURCE: ${MINERU_MODEL_SOURCE:-modelscope}
+    ports:
+      - "127.0.0.1:8010:8010"
+    volumes:
+      - offline-mineru-models:/models
+    mem_limit: 8g
+    cpus: 2
+volumes:
+  offline-mineru-models:
