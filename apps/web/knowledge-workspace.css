@@ -25,3 +25,17 @@
 .knowledge-search button, .inline-search button { white-space: nowrap; flex-shrink: 0; min-width: 64px; }
 .knowledge-search input, .inline-search input { min-width: 0; }
 .knowledge-filters select { font: inherit; max-width: 100%; padding: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.clarification-panel { margin:22px 0; padding:18px; border:1px solid var(--line); background:var(--paper-blue); }
+.clarification-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.clarification-heading h3 { margin:0; font-size:17px; }.clarification-heading button { flex-shrink:0; }
+.clarification-record { border-top:1px solid var(--line); padding:10px 0; font-size:14px; line-height:1.7; }
+.clarification-record summary,.clarification-panel details summary { cursor:pointer; }
+.clarification-panel blockquote { margin:12px 0; border-left:3px solid var(--blue); padding:10px 14px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; background:var(--paper); }
+.clarification-question { white-space:pre-wrap; line-height:1.8; font-weight:600; }
+[data-clarification-answer] { margin:16px 0; padding:16px; background:var(--paper); border:1px solid var(--line); }
+[data-clarification-answer] label { display:grid; gap:8px; margin-top:16px; }
+[data-clarification-answer] textarea { box-sizing:border-box; width:100%; padding:10px; border:1px solid var(--line); font:inherit; color:var(--ink); background:var(--paper); resize:vertical; }
+.clarification-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.photo-job-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid var(--line); font-size:13px; }
+.photo-job-row span { overflow-wrap:anywhere; }.photo-job-row button { flex-shrink:0; }
+@media(max-width:700px) { .clarification-heading { flex-wrap:wrap; }.clarification-panel { padding:14px; } }

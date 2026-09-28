@@ -9,6 +9,10 @@ import { ArkFeedbackProvider } from './ark/feedback.js';
 import { ArkStudyAgent } from './ark/agent.js';
 import { createWebAuth } from './web-auth.js';
 import { KnowledgeWorkspace } from './knowledge/workspace-service.js';
+import { ClarificationService } from './knowledge/clarifications.js';
+import { SourcePhotoService } from './knowledge/source-service.js';
+import { SourcePhotoModel } from './knowledge/source-model.js';
+import { SourcePhotoVerifier } from './knowledge/source-verifier.js';
 import { readKnowledgePage } from './knowledge/source-pages.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,8 +23,11 @@ const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
 const webAuth = createWebAuth();
 const studyService = new StudyService(repository, { modelProvider });
 const knowledgeWorkspace = new KnowledgeWorkspace(repository);
+const clarificationService = new ClarificationService({ repository });
+const sourcePhotoService = new SourcePhotoService({ repository, model: new SourcePhotoModel(modelProvider), verifier: new SourcePhotoVerifier({ repository }), logger: console });
 const feedbackService = studyService.feedbackService;
 let startupFeedbackRecovery = { queuedJobIds: [], interruptedJobIds: [] };
+await sourcePhotoService.reconcile();
 try {
   // Reconcile before listen() so only work left by an earlier process can be
   // classified as interrupted. Recovered queued jobs are processed after the
@@ -98,13 +105,30 @@ const server = createServer(async (request, response) => {
     const actor = { id: `web:${session.user}`, role: session.role };
     if (url.pathname.startsWith('/api/knowledge-v2/')) {
       const route = url.pathname.slice('/api/knowledge-v2'.length);
+      if (request.method === 'GET' && route === '/photo-jobs') return sendJson(response, 200, await sourcePhotoService.list(actor, Object.fromEntries(url.searchParams)));
+      const photoJob = route.match(/^\/photo-jobs\/(KP-[a-f0-9]{8})(?:\/(retry))?$/);
+      if (photoJob && request.method === 'GET' && !photoJob[2]) return sendJson(response, 200, await sourcePhotoService.getVisible(photoJob[1], actor));
+      if (photoJob && request.method === 'POST' && photoJob[2] === 'retry') return sendJson(response, 200, await sourcePhotoService.retry(photoJob[1], actor));
+      if (request.method === 'GET' && route === '/clarifications') return sendJson(response, 200, await clarificationService.list(Object.fromEntries(url.searchParams), actor));
+      if (request.method === 'POST' && route === '/clarifications/next') return sendJson(response, 200, await clarificationService.next(null, actor));
+      if (request.method === 'POST' && route === '/clarifications/answers') {
+        const input = await readJson(request);
+        return sendJson(response, 200, await clarificationService.answer(input.invitationId, { text: input.text, idempotencyKey: input.idempotencyKey }, actor));
+      }
+      if (request.method === 'POST' && route === '/clarifications/defer') {
+        const input = await readJson(request);
+        return sendJson(response, 200, await clarificationService.defer(input.invitationId, actor));
+      }
       if (request.method === 'GET' && route === '/sources') return sendJson(response, 200, await knowledgeWorkspace.sources());
       if (request.method === 'GET' && route === '/points') return sendJson(response, 200, await knowledgeWorkspace.list(Object.fromEntries(url.searchParams)));
       if (request.method === 'POST' && route === '/search') {
         const input = await readJson(request);
         return sendJson(response, 200, await knowledgeWorkspace.search(input.query, { textbookOnly: input.textbookOnly === true, limit: input.limit }));
       }
-      if (request.method === 'POST' && route === '/spot-checks') return sendJson(response, 200, await knowledgeWorkspace.spotCheck(actor));
+      if (request.method === 'POST' && route === '/spot-checks') {
+        const clarification = await clarificationService.next(null, actor);
+        return sendJson(response, 200, clarification ? { type: 'clarification', ...clarification } : await knowledgeWorkspace.spotCheck(actor));
+      }
       const match = route.match(/^\/points\/([^/]+)(?:\/(graph|excerpt|answer-reviews|enrollment|relations))?$/);
       if (match) {
         const id = decodeURIComponent(match[1]), action = match[2];
@@ -238,6 +262,7 @@ function redirect(response, location) {
 
 server.listen(port, host, () => {
   console.log(`333 review assistant is running at http://localhost:${server.address().port} (bound to ${host})`);
+  void sourcePhotoService.processQueued().catch(error => console.warn('Recovered photo jobs could not be processed:', error.code ?? error.message));
   if (startupFeedbackRecovery.interruptedJobIds.length) {
     console.warn(`${startupFeedbackRecovery.interruptedJobIds.length} interrupted feedback job(s) were marked failed safely.`);
   }
@@ -245,7 +270,7 @@ server.listen(port, host, () => {
     void feedbackService.processQueued(startupFeedbackRecovery.queuedJobIds)
       .catch((error) => console.warn('Recovered feedback jobs could not be processed:', error.code ?? error.message));
   }
-  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, logger: console })
+  startFeishuBot({ studyService, repository, feedbackService, modelProvider, studyAgent, sourcePhotoService, logger: console })
     .then((result) => { feishuBotStatus = result; })
     .catch((error) => {
       feishuBotStatus = { status: 'error', message: error.message };

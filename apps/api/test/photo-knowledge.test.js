@@ -116,15 +116,18 @@ test('OCR passes contain only original images and reject truncated model JSON', 
   const model = new PhotoKnowledgeModel({ complete: async req => { requests.push(req); return { content: '{"pages":[{"text":"RAW"}]}', finishReason: 'stop' }; } });
   await model.recognize(images, 1); await model.recognize(images, 2);
   assert.equal(requests[1].messages.length, 2);
+  assert.equal(requests[1].stream, true);
   assert.doesNotMatch(JSON.stringify(requests[1]), /RAW/);
   model.provider.complete = async () => ({ finishReason: 'length', content: '{}' });
   await assert.rejects(() => model.recognize(images, 1), /incomplete/);
+  model.provider.complete = async () => ({ content: '{}' });
+  await assert.rejects(() => model.align({}, {}), /incomplete/);
 });
 
 test('web-search adapter requires actual tool execution and grounded citation URLs', async () => {
   let payload = { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ checks: [{ id: 'K1', status: 'supported', text: 'valid', citations: ['https://fake.test'] }] }), annotations: [] }] }] };
-  const search = new ArkKnowledgeSearch({ apiKey: 'test', model: 'model', fetchImpl: async (_url, req) => { assert.equal(JSON.parse(req.body).store, false); return Response.json(payload); } });
-  await assert.rejects(() => search.verify(content()), /search_not_executed/);
+  const search = new ArkKnowledgeSearch({ apiKey: 'test', model: 'model', maxRetries: 0, fetchImpl: async (_url, req) => { assert.equal(JSON.parse(req.body).store, false); assert.equal(JSON.parse(req.body).stream, true); return new Response('data: ' + JSON.stringify({ type: 'response.completed', response: payload }) + '\n\n', { headers: { 'content-type': 'text/event-stream' } }); } });
+  assert.equal((await search.verify(content())).errors[0].code, 'search_not_executed');
   payload.output.unshift({ type: 'web_search_call', status: 'completed', action: { sources: [{ url: 'https://ctext.org' }] } });
   assert.equal((await search.verify(content())).checks[0].status, 'unresolved');
   payload.output[1].content[0].text = JSON.stringify({ checks: [{ id: 'K1', status: 'supported', text: 'valid', citations: ['https://ctext.org'] }] });

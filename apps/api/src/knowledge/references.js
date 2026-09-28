@@ -8,6 +8,8 @@ export function referenceForPoint(point) {
     citations: point.citations || [], documentId: point.sourceDocumentId, itemId: point.sourceItemId,
     version: point.sourceVersion, sourceTitle: point.sourceTitle, sourceAnchors: point.sourceAnchors || [],
     qualityIssues: point.qualityIssues || [], structureStatus: point.structureStatus,
+    ...(point.materialKind === 'source_note' ? { materialKind: point.materialKind, userDefinedAnswers: point.userDefinedAnswers || [],
+      transcriptionStatus: point.transcriptionStatus, factStatus: point.factStatus } : {}),
     answer: point.reviewedAnswer || null
   });
 }

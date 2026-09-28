@@ -5,12 +5,38 @@ import { ConversationMemory } from '../agent/memory.js';
 import { savedItems, searchSavedItems, uploadTimestamp } from './library.js';
 
 function state(data) { return data.photoKnowledge ??= { schemaVersion: 1, drafts: {}, documents: {}, events: [] }; }
-function errorCode(error) { return ['search_not_enabled', 'search_not_configured', 'search_not_executed', 'search_incomplete', 'model_output_incomplete', 'invalid_model_json'].includes(error.message) ? error.message : 'processing_failed'; }
+const SAFE_ERROR_CODES = new Set([
+  'search_not_enabled', 'search_not_configured', 'search_not_executed', 'search_incomplete',
+  'search_provider_failed', 'search_partial_failed', 'search_budget_exceeded', 'invalid_search_checks',
+  'model_output_incomplete', 'invalid_model_json', 'timeout', 'network_error', 'invalid_response',
+  'empty_response', 'not_configured', 'invalid_draft', 'invalid_draft_item', 'incomplete_ocr_pages',
+  'invalid_image', 'context_budget_exceeded', 'stream_incomplete', 'stream_limit_exceeded',
+  'invalid_search_config', 'upstream_stream_error', 'aborted'
+]);
+export function errorCode(error) {
+  for (const code of [error?.code, error?.message]) {
+    if (typeof code === 'string' && (SAFE_ERROR_CODES.has(code) || /^upstream_\d{3}$/.test(code))) return code;
+  }
+  if (['AbortError', 'TimeoutError'].includes(error?.name)) return 'timeout';
+  return 'processing_failed';
+}
+
+export function diagnosticText(value, limit) {
+  let result = typeof value === 'string' ? value : '';
+  if (process.env.ARK_API_KEY) result = result.split(process.env.ARK_API_KEY).join('[redacted]');
+  return result.replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key|authorization)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/data:[^;\s]+;base64,[A-Za-z0-9+/=]+/g, '[image data omitted]')
+    .slice(0, limit);
+}
 function normalize(value) {
   if (!value || typeof value.title !== 'string' || !Array.isArray(value.items) || !value.items.length || value.items.length > 40) throw new Error('invalid_draft');
+  for (const field of ['differences', 'queries']) {
+    if (value[field] != null && (!Array.isArray(value[field]) || value[field].some(entry => typeof entry !== 'string'))) throw new Error('invalid_draft');
+  }
   const ids = new Set();
   for (const item of value.items) {
-    if (typeof item.id !== 'string' || !/^[\w-]{1,40}$/.test(item.id) || ids.has(item.id) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 6000 || typeof item.title !== 'string') throw new Error('invalid_draft_item');
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[\w-]{1,40}$/.test(item.id) || ids.has(item.id) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 6000 || typeof item.title !== 'string') throw new Error('invalid_draft_item');
     ids.add(item.id);
   }
   return { title: value.title.slice(0, 200), transcription: String(value.transcription ?? '').slice(0, 40000), differences: (value.differences ?? []).slice(0, 80), items: value.items, queries: (value.queries ?? []).filter(q => typeof q === 'string').slice(0, 6) };
@@ -26,7 +52,8 @@ export function draftText(draft) {
   });
   return [`知识草稿 ${draft.id} v${v.version}｜${v.content.title}`, ...rows,
     v.content.differences.length ? `识读/修订差异：\n${v.content.differences.join('\n')}` : '两次识读未报告文字分歧；这不等于事实正确。',
-    v.searchError === 'search_not_enabled' ? '联网搜索服务尚未开通，本稿不能作为已核验知识保存。' : '',
+    v.searchError === 'search_not_enabled' ? '联网搜索服务尚未开通，本稿不能作为已核验知识保存。'
+      : v.searchError ? `联网核验未全部完成（${v.searchError}）；已完成的结果保留，失败或未处理条目标为待核验。` : '',
     `羊羊核对后可回复：确认 ${draft.id} v${v.version}。有待核验项时，可明确回复“确认已核验部分 ${draft.id} v${v.version}”。`,
     v.verification?.checks?.some(c => c.textbookSuggestion) ? `核对教材摘录与校正建议后，可明确回复“确认教材校正 ${draft.id} v${v.version}”；没有依据的条目不会保存。` : '',
     `修改建议：修改 ${draft.id} v${v.version}：……；完整定稿并要求保存：修改并保存 ${draft.id} v${v.version}：……。修改后会重新联网核验。`,
@@ -34,10 +61,20 @@ export function draftText(draft) {
 }
 
 export class PhotoKnowledgeService {
-  constructor({ repository, model, search, approverId, assetsDir }) {
-    Object.assign(this, { repository, model, search, approverId });
+  constructor({ repository, model, search, approverId, assetsDir, logger = console }) {
+    Object.assign(this, { repository, model, search, approverId, logger });
     this.assetsDir = assetsDir || path.join(path.dirname(repository.filePath), 'knowledge-assets');
     this.memory = new ConversationMemory(repository);
+  }
+  logFailure(draftId, failedStage, error, startedAt, details = {}) {
+    const code = errorCode(error);
+    try {
+      this.logger?.error?.('[PhotoKnowledgeService]', {
+        draftId, failedStage, code, elapsedMs: Math.max(0, Date.now() - startedAt), ...details,
+        message: diagnosticText(error?.message, 500), stack: diagnosticText(error?.stack, 2000)
+      });
+    } catch { /* Diagnostics must not discard a preserved draft. */ }
+    return code;
   }
   async reconcile() {
     return this.repository.mutate(data => {
@@ -60,6 +97,8 @@ export class PhotoKnowledgeService {
       return structuredClone(store.drafts[id] = { id, scopeKey: scope.key, sessionId: session.id, sourceMessageId: message.messageId, sourceUploadedAt: uploadTimestamp(message.createTime) || new Date().toISOString(), senderId: message.senderId, status: 'recognizing', createdAt: new Date().toISOString(), versions: [], reads: [], assets: [], actions: [] });
     });
     if (draft.duplicate) return draft;
+    const startedAt = Date.now();
+    let stage = 'assets';
     try {
       const assets = [];
       await mkdir(this.assetsDir, { recursive: true });
@@ -73,17 +112,25 @@ export class PhotoKnowledgeService {
       }
       await this.patch(draft.id, d => { d.assets = assets; });
       for (const pass of [1, 2]) {
+        stage = `ocr_${pass}`;
         const result = await this.model.recognize(images, pass);
-        if (!Array.isArray(result.data?.pages) || result.data.pages.length !== images.length || result.data.pages.some(p => typeof p.text !== 'string' || !p.text.trim())) throw new Error('incomplete_ocr_pages');
+        if (!Array.isArray(result.data?.pages) || result.data.pages.length !== images.length || result.data.pages.some(p => !p || typeof p.text !== 'string' || !p.text.trim())) throw new Error('incomplete_ocr_pages');
         draft.reads.push(result);
         await this.patch(draft.id, d => { d.reads = draft.reads; d.status = pass === 2 ? 'aligning' : 'recognizing'; });
       }
+      stage = 'align';
       const aligned = await this.model.align(draft.reads[0].data, draft.reads[1].data);
-      await this.makeVersion(draft.id, normalize(aligned.data), { kind: 'image', model: aligned.model });
-    } catch (error) { await this.patch(draft.id, d => { d.status = 'failed'; d.error = errorCode(error); }); }
+      const content = normalize(aligned.data);
+      stage = 'verify';
+      await this.makeVersion(draft.id, content, { kind: 'image', model: aligned.model });
+    } catch (error) {
+      const code = this.logFailure(draft.id, stage, error, startedAt);
+      await this.patch(draft.id, d => { d.status = 'failed'; d.error = code; d.failedStage = stage; });
+    }
     return this.get(scope, draft.id);
   }
   async makeVersion(id, content, change) {
+    const startedAt = Date.now();
     await this.patch(id, d => { d.status = 'verifying'; d.pendingContent = content; d.pendingChange = change; });
     const data = await this.repository.read(), draft = state(data).drafts[id];
     const textbooks = savedItems(data, key => key === draft.scopeKey).filter(p => p.materialKind === 'textbook');
@@ -96,22 +143,35 @@ export class PhotoKnowledgeService {
         const result = await this.model.compareTextbook(item, evidence);
         if (!['supported', 'corrected'].includes(result.status) || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 6000 || !Array.isArray(result.evidenceIds) || !result.evidenceIds.length || result.evidenceIds.some(eid => !evidence.some(e => e.id === eid))) continue;
         suggestions.set(item.id, { status: result.status, text: result.text, reason: String(result.reason || '').slice(0, 1000), evidence: evidence.filter(e => result.evidenceIds.includes(e.id)) });
-      } catch { /* A failed comparison must remain a visible unresolved item. */ }
+      } catch (error) { this.logFailure(id, 'textbook_compare', error, startedAt, { itemId: item.id }); }
     }
     let verification, searchError;
     const remaining = content.items.filter(item => !suggestions.has(item.id));
-    if (remaining.length) try { verification = await this.search.verify({ ...content, items: remaining }); } catch (error) { searchError = errorCode(error); }
+    if (remaining.length) {
+      try {
+        verification = await this.search.verify({ ...content, items: remaining });
+        if (verification?.errors?.length) {
+          searchError = 'search_partial_failed';
+          for (const failure of verification.errors) {
+            this.logFailure(id, 'verify', Object.assign(new Error(failure.code), { code: failure.code }), startedAt,
+              { batch: failure.batch, itemIds: failure.itemIds, attempts: failure.attempts });
+          }
+        }
+      } catch (error) { searchError = this.logFailure(id, 'verify', error, startedAt); }
+    }
     // Even injected providers must supply evidence; never let model text authorize a write.
     const checks = content.items.map(item => {
-      const c = verification?.checks?.find(c => c.id === item.id);
-      const links = (c?.citations ?? []).filter(url => typeof url === 'string' && /^https?:\/\//.test(url));
-      return { id: item.id, text: c?.text || item.text, reason: c?.reason || '未找到已核对证据', citations: links, status: ['supported', 'corrected'].includes(c?.status) && links.length ? c.status : 'unresolved',
+      const matches = Array.isArray(verification?.checks) ? verification.checks.filter(c => c?.id === item.id) : [];
+      const c = matches.length === 1 ? matches[0] : null;
+      const links = (Array.isArray(c?.citations) ? c.citations : []).filter(url => typeof url === 'string' && /^https?:\/\//.test(url));
+      const validText = typeof c?.text === 'string' && c.text.trim() && c.text.length <= 6000;
+      return { id: item.id, text: validText ? c.text : item.text, reason: typeof c?.reason === 'string' && c.reason.trim() ? c.reason : '未找到已核对证据', citations: links, status: ['supported', 'corrected'].includes(c?.status) && links.length && validText ? c.status : 'unresolved',
         ...(suggestions.has(item.id) ? { textbookSuggestion: suggestions.get(item.id) } : {}) };
     });
     return this.patch(id, d => {
       const version = d.versions.length + 1;
-      d.versions.push({ version, content, verification: { ...verification, checks }, searchError, change, createdAt: new Date().toISOString(), contentHash: createHash('sha256').update(JSON.stringify({ content, checks })).digest('hex'), delivered: false });
-      d.status = 'awaiting_confirmation'; delete d.error;
+      d.versions.push({ version, content, verification: { ...verification, checks }, searchError, ...(searchError ? { failedStage: 'verify' } : {}), change, createdAt: new Date().toISOString(), contentHash: createHash('sha256').update(JSON.stringify({ content, checks })).digest('hex'), delivered: false });
+      d.status = 'awaiting_confirmation'; delete d.error; delete d.failedStage;
       delete d.pendingContent; delete d.pendingChange;
       return structuredClone(d);
     });
@@ -196,15 +256,19 @@ export class PhotoKnowledgeService {
       draft.status = 'revising'; draft.pendingChange = { kind: verb, request: body, senderId: message.senderId, messageId: message.messageId, parentVersion: version }; return true;
     });
     if (!claimed) return { text: '已有修订在处理，请等待新版本。' };
+    const startedAt = Date.now();
+    let stage = verb === '重新核验' ? 'verify' : 'revise';
     try {
       const revised = verb === '重新核验' ? latest.content : normalize((await this.model.revise(latest.content, body)).data);
+      stage = 'verify';
       const next = await this.makeVersion(d.id, revised, { kind: verb, request: body || null, senderId: message.senderId, messageId: message.messageId, parentVersion: version });
       await this.patch(d.id, draft => { draft.actions.push(message.messageId); });
       // Even explicit "modify and save" first delivers the generated revision. Its
       // confirmation is performed by the controller after delivery, not by the LLM.
       return { draft: next, saveAfterDelivery: verb === '修改并保存' };
     } catch (error) {
-      await this.patch(d.id, draft => { draft.status = 'awaiting_confirmation'; draft.error = errorCode(error); });
+      const code = this.logFailure(d.id, stage, error, startedAt);
+      await this.patch(d.id, draft => { draft.status = 'awaiting_confirmation'; draft.error = code; draft.failedStage = stage; });
       return { text: '修改处理失败，原草稿和已保存版本均保留；请稍后重试。' };
     }
   }
