@@ -9,7 +9,7 @@ import { conversationScope } from '../apps/api/src/agent/memory.js';
 const directory = path.resolve(process.env.PHOTO_TEST_OUTPUT_DIR || '.data/knowledge-test');
 await mkdir(directory, { recursive: true });
 const repository = new LocalRepository(path.join(directory, 'live-pipeline.json'));
-const provider = new ArkFeedbackProvider({ timeoutMs: 60000 });
+const provider = new ArkFeedbackProvider();
 const service = new PhotoKnowledgeService({ repository, model: new PhotoKnowledgeModel(provider), search: new ArkKnowledgeSearch(), approverId: 'test-user' });
 const scope = conversationScope({ appId: 'isolated-live-test', chatType: 'group', chatId: 'test-only' });
 const files = process.argv.slice(2);

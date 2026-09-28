@@ -1,11 +1,12 @@
 import { answerFeedbackSystemPrompt } from '../agent/prompts.js';
 import { knowledgeContextRule } from '../knowledge/library.js';
 import { guardContext } from '../agent/context-builder.js';
+import { readSse, readResponseText } from './sse.js';
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const DEFAULT_MODEL_ID = 'doubao-seed-2-1-turbo-260628';
 const DEFAULT_THINKING_TYPE = 'disabled';
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 const MAX_ANSWER_CHARS = 8_000;
 const MAX_FEEDBACK_PART_CHARS = 140;
 
@@ -23,9 +24,10 @@ function endpoint(baseUrl) {
 }
 
 function timeoutValue(value, fallback = REQUEST_TIMEOUT_MS) {
+  if (!['string', 'number'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return fallback;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(60_000, Math.max(1_000, Math.round(parsed)));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(600_000, Math.max(1_000, Math.round(parsed)));
 }
 
 function thinkingType(value) {
@@ -78,6 +80,39 @@ export class ArkFeedbackError extends Error {
   }
 }
 
+async function streamedCompletion(response, signal, modelId) {
+  const parts = [];
+  let finishReason, usage, done = false;
+  for await (const event of readSse(response, { signal })) {
+    if (event.event === 'error') throw new ArkFeedbackError('upstream_stream_error');
+    if (event.data.trim() === '[DONE]') { done = true; break; }
+    let payload;
+    try { payload = JSON.parse(event.data); } catch { throw new ArkFeedbackError('invalid_response'); }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new ArkFeedbackError('invalid_response');
+    if (payload.error) throw new ArkFeedbackError('upstream_stream_error');
+    if (payload.usage != null) usage = payload.usage;
+    if (!Array.isArray(payload.choices)) throw new ArkFeedbackError('invalid_response');
+    const choice = payload.choices.find(item => item?.index === 0);
+    if (!choice) {
+      if (payload.choices.length) throw new ArkFeedbackError('invalid_response');
+      continue; // The final usage event has an empty choices array.
+    }
+    if (choice.finish_reason != null) {
+      if (typeof choice.finish_reason !== 'string' || !choice.finish_reason || (finishReason && finishReason !== choice.finish_reason)) throw new ArkFeedbackError('invalid_response');
+      finishReason = choice.finish_reason;
+    }
+    const content = choice.delta?.content;
+    if (content != null) {
+      if (typeof content !== 'string') throw new ArkFeedbackError('invalid_response');
+      parts.push(content);
+    }
+  }
+  if (!done || !finishReason) throw new ArkFeedbackError('stream_incomplete');
+  const content = parts.join('').trim();
+  if (!content) throw new ArkFeedbackError('empty_response');
+  return { content, modelId, finishReason, usage };
+}
+
 /**
  * Minimal server-side client for Ark's OpenAI-compatible chat endpoint.
  * It deliberately never returns provider error bodies, which can otherwise
@@ -106,14 +141,15 @@ export class ArkFeedbackProvider {
     return Boolean(this.apiKey && this.modelId && typeof this.fetchImpl === 'function');
   }
 
-  async complete({ messages, temperature = 0.2, maxTokens = 320 }) {
+  async complete({ messages, temperature = 0.2, maxTokens = 320, stream = false }) {
     guardContext(messages);
     if (!this.isConfigured()) throw new ArkFeedbackError('not_configured');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response;
     try {
-      const response = await this.fetchImpl(endpoint(this.baseUrl), {
+      response = await this.fetchImpl(endpoint(this.baseUrl), {
         method: 'POST',
         headers: {
           authorization: `Bearer ${this.apiKey}`,
@@ -125,14 +161,17 @@ export class ArkFeedbackProvider {
           max_tokens: maxTokens,
           thinking: { type: this.thinking },
           ...(this.serviceTier ? { service_tier: this.serviceTier } : {}),
+          ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
           messages
         }),
         signal: controller.signal
       });
       if (!response.ok) throw new ArkFeedbackError(`upstream_${response.status}`);
+      if (stream) return await streamedCompletion(response, controller.signal, this.modelId);
+      const raw = await readResponseText(response, { signal: controller.signal });
       let payload;
       try {
-        payload = await response.json();
+        payload = JSON.parse(raw);
       } catch {
         throw new ArkFeedbackError('invalid_response');
       }
@@ -140,11 +179,16 @@ export class ArkFeedbackProvider {
       if (!content) throw new ArkFeedbackError('empty_response');
       return { content, modelId: this.modelId, finishReason: payload.choices?.[0]?.finish_reason, usage: payload.usage };
     } catch (error) {
+      if (controller.signal.aborted || ['AbortError', 'TimeoutError'].includes(error?.name) || error?.code === 'timeout') throw new ArkFeedbackError('timeout');
       if (error instanceof ArkFeedbackError) throw error;
-      if (error?.name === 'AbortError') throw new ArkFeedbackError('timeout');
+      if (['invalid_response', 'network_error', 'stream_incomplete', 'stream_limit_exceeded'].includes(error?.code)) throw new ArkFeedbackError(error.code);
       throw new ArkFeedbackError('network_error');
     } finally {
       clearTimeout(timeout);
+      // Also release an unread non-2xx body; never wait on a provider cancel hook.
+      if (response?.body && !response.body.locked) {
+        try { Promise.resolve(response.body.cancel()).catch(() => {}); } catch {}
+      }
     }
   }
 
