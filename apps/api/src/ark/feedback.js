@@ -43,6 +43,7 @@ function userPrompt({ task, answer }) {
     `知识点：${clip(task?.title, 300) || '未命名知识点'}`,
     `回忆题：${clip(task?.prompt, 1_500) || '未提供'}`,
     ...(task?.reference ? [`本题参考状态：${JSON.stringify({ knowledgePointId: task.reference.knowledgePointId, version: task.reference.version, status: 'unreviewed' })}；不据此判定事实对错。`] : []),
+    ...(task?.reference?.userDefinedAnswers?.length ? [`学习者后续界定答案（只对照本人补充，不代表知识已核验）：${JSON.stringify(task.reference.userDefinedAnswers.map(a => ({ kind: a.kind, text: a.text })).slice(0, 8)).slice(0, 8000)}`] : []),
     `用户回忆：${clip(answer, MAX_ANSWER_CHARS)}`
   ].join('\n\n');
 }

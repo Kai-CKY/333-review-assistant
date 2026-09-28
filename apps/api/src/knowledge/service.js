@@ -21,7 +21,7 @@ export function errorCode(error) {
   return 'processing_failed';
 }
 
-function diagnosticText(value, limit) {
+export function diagnosticText(value, limit) {
   let result = typeof value === 'string' ? value : '';
   if (process.env.ARK_API_KEY) result = result.split(process.env.ARK_API_KEY).join('[redacted]');
   return result.replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')

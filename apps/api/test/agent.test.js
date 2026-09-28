@@ -89,7 +89,7 @@ test('group conversation keeps distinct speakers, shared group history and no pr
   assert.deepEqual(sent[2][2], { replyTo: 'm3' });
 });
 
-test('group bot accepts both speakers without mention only in the configured group', async () => {
+test('group bot observes ordinary messages silently and answers explicit assistant requests only in the configured group', async () => {
   const names = ['FEISHU_ENABLED', 'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_TESTER_OPEN_ID', 'FEISHU_GROUP_CHAT_ENABLED', 'FEISHU_TEST_GROUP_ID', 'FEISHU_GROUP_TEST_ENABLED'];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   Object.assign(process.env, { FEISHU_ENABLED: 'true', FEISHU_APP_ID: 'test', FEISHU_APP_SECRET: 'test', FEISHU_TESTER_OPEN_ID: 'ou_private', FEISHU_GROUP_CHAT_ENABLED: 'true', FEISHU_TEST_GROUP_ID: 'oc_group', FEISHU_GROUP_TEST_ENABLED: 'false' });
@@ -97,14 +97,16 @@ test('group bot accepts both speakers without mention only in the configured gro
     const repository = await temporaryRepository('group-gate-');
     const replies = [], handlers = {};
     const provider = { isConfigured: () => true, complete: async () => ({ content: '群聊回复' }) };
-    const channel = { on: (name, fn) => { handlers[name] = fn; }, connect: async () => {}, send: async (...args) => replies.push(args) };
+    const channel = { botIdentity: { openId: 'ou_bot' }, on: (name, fn) => { handlers[name] = fn; }, connect: async () => {}, send: async (...args) => replies.push(args) };
     await startFeishuBot({ repository, studyService: new StudyService(repository, { modelProvider: provider }), channelFactory: (config) => { assert.equal(config.policy.requireMention, false); assert.deepEqual(config.policy.groupAllowlist, ['oc_group']); return channel; }, logger: { log() {}, warn() {}, error() {} } });
     const msg = { chatType: 'group', chatId: 'oc_group', rawContentType: 'text', content: '你好', mentionedBot: false };
     await handlers.message({ ...msg, senderId: 'ou_owner', messageId: 'm1' });
     await handlers.message({ ...msg, senderId: 'ou_yangyang', messageId: 'm2' });
     await handlers.message({ ...msg, chatId: 'oc_other', senderId: 'ou_owner', messageId: 'm3' });
+    await handlers.message({ ...msg, content: '小助手，请解释课程标准', senderId: 'ou_owner', messageId: 'm4' });
+    await handlers.message({ ...msg, content: '请解释课程标准', mentionedBot: true, senderId: 'ou_yangyang', messageId: 'm5' });
     await waitFor(() => replies.length === 2);
-    assert.deepEqual(replies.map((r) => r[2].replyTo), ['m1', 'm2']);
+    assert.deepEqual(replies.map((r) => r[2].replyTo), ['m4', 'm5']);
   } finally {
     for (const name of names) {
       if (previous[name] === undefined) delete process.env[name];

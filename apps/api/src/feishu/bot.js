@@ -22,8 +22,10 @@ import {
 } from './cards.js';
 import { FeishuSessionStore } from './session-store.js';
 import { createGroupConversation } from './group-conversation.js';
-import { PhotoKnowledgeService } from '../knowledge/service.js';
-import { PhotoKnowledgeModel, ArkKnowledgeSearch } from '../knowledge/providers.js';
+import { SourcePhotoService } from '../knowledge/source-service.js';
+import { SourcePhotoModel } from '../knowledge/source-model.js';
+import { SourcePhotoVerifier } from '../knowledge/source-verifier.js';
+import { ClarificationService } from '../knowledge/clarifications.js';
 import { feishuIdentityConfig, identifySender, canReceivePrivate, identityDescription } from '../agent/identity.js';
 
 const validRatings = new Set(ratings);
@@ -130,6 +132,7 @@ export async function startFeishuBot({
   repository,
   feedbackService = null,
   modelProvider = null,
+  sourcePhotoService = null,
   studyAgent = null,
   channelFactory = lark.createLarkChannel,
   logger = console,
@@ -178,14 +181,15 @@ export async function startFeishuBot({
     }
     return sent;
   };
-  const knowledgeService = new PhotoKnowledgeService({ repository,
-    model: new PhotoKnowledgeModel(feedbackProvider), search: new ArkKnowledgeSearch(),
-    approverId: config.learnerId });
-  await knowledgeService.reconcile();
+  const knowledgeService = sourcePhotoService ?? new SourcePhotoService({ repository,
+    model: new SourcePhotoModel(feedbackProvider), verifier: new SourcePhotoVerifier({ repository }),
+    approverId: config.learnerId, logger });
+  if (!sourcePhotoService) await knowledgeService.reconcile();
+  const clarificationService = new ClarificationService({ repository, approverId: config.learnerId });
   const groupConversation = createGroupConversation({
     repository, provider: feedbackProvider, channel, chatId: config.testGroupId,
     yangyangOpenId: config.learnerId, ownerOpenId: config.ownerId, logger,
-    appId: config.appId, knowledgeService
+    appId: config.appId, knowledgeService, clarificationService
   });
   const receiptReactionAvailable = typeof channel.addReaction === 'function';
   let receiptReactionFailureLogged = false;
@@ -885,9 +889,7 @@ export async function startFeishuBot({
     if (message.chatType === 'group') {
       if (!config.groupChatEnabled || message.chatId !== config.testGroupId) return;
       if (!message.senderId || message.senderId === channel.botIdentity?.openId) return;
-      acknowledgeMessage(message.messageId);
       if (!['text', 'post', 'image', 'file'].includes(message.rawContentType)) {
-        await channel.send(message.chatId, { text: '可以发送文字、图片、图文或 PDF 附件；暂不支持语音和其他文件。' }, { replyTo: message.messageId });
         return;
       }
       queueModelReply(message.chatId, 'Group conversation', () => groupConversation(message));
@@ -1028,6 +1030,10 @@ export async function startFeishuBot({
   channel.on('reconnecting', () => logger.warn('Feishu long connection is reconnecting.'));
   channel.on('reconnected', () => logger.log('Feishu long connection reconnected.'));
   await channel.connect();
+  if (!sourcePhotoService) {
+    void Promise.resolve().then(() => knowledgeService.processQueued())
+      .catch(error => logger.warn(`Source photo worker failed (${safeErrorCode(error)}).`));
+  }
   if (config.groupTestConfigurationError) {
     logger.warn(config.groupTestConfigurationError);
   }
@@ -1043,7 +1049,7 @@ export async function startFeishuBot({
     groupCheckinTest: config.groupTestEnabled ? { status: 'armed', chatId: config.testGroupId } : { status: 'disabled' },
     naturalLanguage: naturalAgent.isConfigured() ? 'configured' : 'disabled',
     receiptReaction: receiptReactionAvailable ? 'configured' : 'unavailable',
-    photoKnowledge: 'double-ocr-search-confirm-v1',
+    photoKnowledge: 'source-restoration-background-v1',
     conversationIsolation: 'app-chat-kind-peer-topic-session-v1'
   };
 }
