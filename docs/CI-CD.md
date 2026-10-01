@@ -3,10 +3,12 @@
 ## 当前阶段
 
 - CI 已启用：推送到 `main`、Pull Request 和手动触发都会安装锁定依赖、运行测试并构建 Docker 镜像。
+- CI 镜像现在带有构建提交 `APP_REVISION`；管理员登录后可用 `GET /api/runtime` 查询正在运行的镜像所报告的提交。旧镜像或未传构建参数的镜像会报告 `unknown`。当前阿里云主机只有 896 MiB 内存；2026-10-01 在其上构建 `better-sqlite3` 导致正式容器 OOM，因此禁止在此主机直接执行 `docker compose up --build`。生产发布前须建立 CI/外部构建镜像的交付路径，并验证准确提交、备份、健康检查和回滚。
 - CD 暂不自动化：服务器手动发布通过 CI 的准确提交。仅在分支未分叉、工作区干净时使用 `git pull --ff-only`；发生过回滚时先按本次发布操作单核对状态。
 - CI 不加载 `.env.local`，不接触飞书、模型或服务器密钥，也不会产生真实消息或付费模型调用。
 - PDF 解析已改为离线，默认 CI 不构建 MinerU、不下载 OCR 模型。CI 增加轻量检索回归；生产镜像仅包含学习应用。
 - 镜像构建后，在容器里分别使用临时 JSON 和 SQLite 启动应用，验证健康检查、登录、知识接口与 PDF 撤回边界，检查 Alpine 的原生 SQLite 依赖可运行。
+- 线上只读排障证据与本机隔离原则见 [开发/线上运行操作单](DEV-PROD-OPERATIONS.md)。
 - 本次知识库版本的回滚衔接、提交边界与发布步骤见 [知识库 V2 发布操作单](RELEASE-KNOWLEDGE-V2-OFFLINE-PDF.md)。本地等价检查与 GitHub Actions 远端结果分别记录。
 
 ## 为什么暂不自动发布
@@ -24,7 +26,8 @@
 
    ```bash
    git pull --ff-only
-   sudo docker compose up -d --build
+   # 先由 CI/外部构建机交付经验证的目标镜像；本服务器不得本地构建。
+   sudo docker compose up -d --no-build
    sudo docker compose ps
    sudo docker compose logs --tail=100 app
    ```
