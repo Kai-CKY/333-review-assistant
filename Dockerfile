@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+ARG APP_REVISION=unknown
+ENV APP_REVISION=${APP_REVISION}
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

@@ -1,8 +1,10 @@
 .git
 .env
 .env.local
+.env.staging.local
 .data
 runtime-data
+staging-runtime-data
 node_modules
 coverage
 docs

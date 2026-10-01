@@ -84,6 +84,10 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 403, { error: '请从本站页面提交 JSON 请求。' });
     }
     if (request.method === 'GET' && url.pathname === '/api/session') return sendJson(response, 200, { user: session.user, role: session.role });
+    if (request.method === 'GET' && url.pathname === '/api/runtime') {
+      if (session.role !== 'admin') return sendJson(response, 403, { error: '仅管理员可查看运行版本。' });
+      return sendJson(response, 200, { revision: process.env.APP_REVISION || 'unknown' });
+    }
     const sourcePage = url.pathname.match(/^\/api\/knowledge-sources\/(KP-[a-f0-9]{8})\/pages\/([1-9][0-9]{0,5})$/);
     if (request.method === 'GET' && sourcePage) {
       const { bytes, mime } = await readKnowledgePage(repository, sourcePage[1], Number(sourcePage[2]), { withType: true });

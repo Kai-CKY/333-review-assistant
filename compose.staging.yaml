@@ -1,23 +1,27 @@
+name: 333-review-staging
+
 services:
   app:
-    build:
-      context: .
-      args:
-        APP_REVISION: ${APP_REVISION:-unknown}
+    # This 896 MiB host cannot safely compile better-sqlite3 while production runs.
+    # Reuse the production dependency image when package-lock.json is unchanged.
+    image: 333-review-assistant-app:latest
     restart: unless-stopped
     init: true
+    mem_limit: 256m
+    pids_limit: 64
     env_file:
-      - .env.local
+      - .env.staging.local
     environment:
+      APP_REVISION: ${APP_REVISION:-unknown}
       PORT: "3333"
       HOST: 0.0.0.0
       DATA_FILE: /data/review-assistant.json
-    # Do not make the unauthenticated API public. Access it through an SSH
-    # tunnel until application-level authentication is implemented.
     ports:
-      - "127.0.0.1:3333:3333"
+      - "127.0.0.1:3334:3333"
     volumes:
-      - ./runtime-data:/data
+      - ./staging-runtime-data:/data
+      - ./apps/api:/app/apps/api:ro
+      - ./apps/web:/app/apps/web:ro
     healthcheck:
       test:
         - CMD

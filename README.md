@@ -18,6 +18,10 @@ Web 与飞书主观题进入同一个持久化反馈流程：先创建 `feedback
 
 需要 Node.js 20 或更高版本。在项目目录运行：
 
+首次运行先执行 `npm ci`，按下文“Web 登录配置”创建本机专用的 `.env.local`；本机数据、账号与线上分别保存，不复制服务器的 `.env.local` 或运行数据库。开发与线上版本核对及排障交接见 [开发/线上运行操作单](docs/DEV-PROD-OPERATIONS.md)。
+
+若开发、测试和正式运行都放在同一台服务器，使用 [同机隔离测试与发布流程](docs/SERVER-COLOCATED-WORKFLOW.md)；测试实例的 `compose.staging.yaml` 与正式实例的 `compose.yaml` 使用不同配置、端口和数据卷。
+
 ```powershell
 npm run dev
 ```

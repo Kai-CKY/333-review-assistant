@@ -39,7 +39,7 @@ jobs:
         run: npm run knowledge:evaluate -- --scale 1000
 
       - name: Build deployment image
-        run: docker build --tag 333-review-assistant:ci .
+        run: docker build --build-arg APP_REVISION="${GITHUB_SHA}" --tag 333-review-assistant:ci .
 
       - name: Smoke test deployment image with JSON and SQLite
         run: >-
