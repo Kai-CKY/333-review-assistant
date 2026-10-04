@@ -15,7 +15,7 @@ Review 修复了 demo 与正式仓储不兼容、样板固定日期、管理员�
 
 ## 发布和回滚
 
-1. 在功能分支提交，推 GitHub；该提交的 CI 必须通过。依赖不变，但本次使用本机构建并交付新镜像，服务器不执行构建。
+1. 在功能分支提交，推 GitHub；该提交的 CI 必须通过。依赖不变，本次使用 GitHub CI 构建、测试并交付镜像，本机和旧服务器均不执行构建。CI 在公开仓库的 `image-COMMIT` 预发布中保存源码镜像和 SHA256SUMS，不包含运行数据或凭据。
 2. 使用同一提交构建并验证镜像；在隔离测试目录、独立数据库上验证管理员 API、原图、校正、重启和健康。测试实例的飞书保持关闭。
 3. 记录原提交、镜像 ID 和 Compose 原件。短暂停止正式实例取得最终快照，下载原 JSON 与附件到本机，再用 `scripts/migrate-relational.mjs --source ... --manifest ... --target NEW.sqlite` 转换。校验通过后把 SQLite 放入正式 runtime-data；旧 JSON 保留为原格式备份，不再读写。
 4. 快进正式 `main` 到同一已验证提交，交付已构建镜像，执行 `docker compose up -d --no-build`。配置与图片目录留在正式实例，不复制测试配置或数据库。

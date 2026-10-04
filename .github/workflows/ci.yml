@@ -19,6 +19,8 @@ jobs:
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
@@ -47,3 +49,25 @@ jobs:
           docker run --rm
           --mount "type=bind,source=$PWD/scripts,target=/app/scripts,readonly"
           333-review-assistant:ci node scripts/smoke-deployment.mjs
+
+      - name: Publish verified image for SSH deployment
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/codex/review-console-relational' || github.ref == 'refs/heads/main')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          release="image-${GITHUB_SHA}"
+          if gh release view "$release" >/dev/null 2>&1; then
+            echo "Verified image already published for ${GITHUB_SHA}"
+            exit 0
+          fi
+          destination="${RUNNER_TEMP}/review-image"
+          mkdir -p "$destination"
+          docker tag 333-review-assistant:ci "333-review-assistant:${GITHUB_SHA}"
+          docker save "333-review-assistant:${GITHUB_SHA}" | gzip -1 > "$destination/review-assistant-linux-amd64.tar.gz"
+          (cd "$destination" && sha256sum review-assistant-linux-amd64.tar.gz > SHA256SUMS)
+          gh release create "$release" \
+            "$destination/review-assistant-linux-amd64.tar.gz" "$destination/SHA256SUMS" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Verified deployment image ${GITHUB_SHA:0:12}" \
+            --notes "Linux amd64 image built and smoke-tested by CI. Source revision: ${GITHUB_SHA}. No runtime data or credentials are included."
