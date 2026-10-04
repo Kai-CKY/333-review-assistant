@@ -6,9 +6,12 @@ node_modules/
 .data/knowledge-export/**/*.tmp
 .env
 .env.local
+.env.staging.local
 coverage/
 runtime-data/
+staging-runtime-data/
 # Local document exports may contain private source PDFs and knowledge data.
 outputs/
 __pycache__/
 *.pyc
+prototypes/review-console/.qa/

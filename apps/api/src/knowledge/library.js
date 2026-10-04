@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { conversationScope } from '../agent/memory.js';
-import { todayKey } from '../domain/date.js';
+import { todayKey, addDays } from '../domain/date.js';
 import { rankItems, relevantExcerpt } from './text-search.js';
 import { usableAnswer } from './references.js';
 
@@ -60,8 +60,9 @@ export function savedItems(data, scopeFilter) {
       sourceDocumentId: doc.id, sourceItemId: item.id, sourceScopeKey: doc.scopeKey,
       sourceVersion: revision.version, sourceTitle: revision.title || doc.title,
       sourceSavedAt: revision.savedAt || null, sourceUploadedAt: uploadedAt,
-      forgottenOn: ['textbook', 'source_note'].includes(kind) ? null : uploadedAt ? todayKey(new Date(uploadedAt)) : null,
-      previouslyLearned: !['textbook', 'source_note'].includes(kind), firstLearnedOn: null
+      forgottenOn: doc.learningKind === 'forgotten' || (!doc.learningKind && !['textbook', 'source_note'].includes(kind)) ? uploadedAt ? todayKey(new Date(uploadedAt)) : null : null,
+      previouslyLearned: doc.learningKind === 'forgotten' || (!doc.learningKind && !['textbook', 'source_note'].includes(kind)),
+      firstLearnedOn: doc.learningKind === 'learn' && uploadedAt ? todayKey(new Date(uploadedAt)) : null
     }));
   });
 }
@@ -85,12 +86,20 @@ export function syncSavedKnowledge(data, policy) {
       ...item, sourceKind: 'saved_knowledge', sourceLabel: `入库资料 · ${item.sourceTitle}`,
       recallPrompt: `合上资料，回忆“${item.title}”的关键要点，并尝试用自己的话解释。`,
       order: index, archived: false, hidden: false,
-      practiceEligible: Boolean(data.knowledgeV2?.enrollments?.[item.id]) || (item.materialKind !== 'textbook' && Boolean(item.forgottenOn))
+      practiceEligible: Boolean(data.knowledgeV2?.enrollments?.[item.id]) || (item.materialKind !== 'textbook' && Boolean(item.forgottenOn || item.firstLearnedOn))
     };
     const existing = pointIndex.get(item.id);
     if (existing) Object.assign(existing, point);
     else { data.knowledgePoints.push(point); pointIndex.set(point.id, point); }
     const eventId = `forgotten-upload:${item.id}`;
+    if(item.firstLearnedOn && !eventIds.has(`new-learning-upload:${item.id}`)) {
+      const id=`new-learning-upload:${item.id}`;eventIds.add(id);
+      data.memoryEvents.push({id,knowledgePointId:item.id,type:'new_learning_upload',on:item.firstLearnedOn,recordedAt:new Date().toISOString()});
+      if(!reviewIndex.has(item.id)) {
+        const state={knowledgePointId:item.id,stage:'new',intervalDays:0,mastery:0.3,lapseCount:0,nextReviewOn:addDays(item.firstLearnedOn,1),pendingForgottenReview:false};
+        data.reviewStates.push(state);reviewIndex.set(item.id,state);
+      }
+    }
     if (item.forgottenOn && !eventIds.has(eventId)) {
       eventIds.add(eventId);
       data.memoryEvents.push({ id: eventId, knowledgePointId: item.id, type: 'forgotten_upload', on: item.forgottenOn,

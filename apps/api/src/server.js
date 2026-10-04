@@ -14,6 +14,8 @@ import { SourcePhotoService } from './knowledge/source-service.js';
 import { SourcePhotoModel } from './knowledge/source-model.js';
 import { SourcePhotoVerifier } from './knowledge/source-verifier.js';
 import { readKnowledgePage } from './knowledge/source-pages.js';
+import { ReviewConsole } from './review-console.js';
+import { UploadCorrections } from './knowledge/upload-corrections.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../../web');
@@ -22,6 +24,8 @@ const modelProvider = new ArkFeedbackProvider();
 const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
 const webAuth = createWebAuth();
 const studyService = new StudyService(repository, { modelProvider });
+const reviewConsole = new ReviewConsole(repository);
+const uploadCorrections = new UploadCorrections(repository);
 const knowledgeWorkspace = new KnowledgeWorkspace(repository);
 const clarificationService = new ClarificationService({ repository });
 const sourcePhotoService = new SourcePhotoService({ repository, model: new SourcePhotoModel(modelProvider), verifier: new SourcePhotoVerifier({ repository }), logger: console });
@@ -84,6 +88,20 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 403, { error: '请从本站页面提交 JSON 请求。' });
     }
     if (request.method === 'GET' && url.pathname === '/api/session') return sendJson(response, 200, { user: session.user, role: session.role });
+    if (request.method === 'GET' && url.pathname === '/api/runtime') {
+      if (session.role !== 'admin') return sendJson(response, 403, { error: '仅管理员可查看运行版本。' });
+      return sendJson(response, 200, { revision: process.env.APP_REVISION || 'unknown', dataFormat: repository.format || (/\.(sqlite|db)$/.test(repository.filePath) ? 'sqlite-collections' : 'json'), feishu: feishuBotStatus });
+    }
+    if (url.pathname.startsWith('/api/console') || /^\/api\/uploads\//.test(url.pathname)) {
+      if (session.role !== 'admin') return sendJson(response, 403, { error: '只有管理员可查看工作台或校正记录。' });
+      if (request.method === 'GET' && url.pathname === '/api/console') return sendJson(response, 200, await reviewConsole.view());
+      const asset = url.pathname.match(/^\/api\/console\/assets\/([a-f0-9]{64})$/);
+      if (request.method === 'GET' && asset) { const { bytes, mime } = await reviewConsole.asset(asset[1]); response.writeHead(200, { 'Content-Type': mime }); return response.end(bytes); }
+      if (request.method === 'POST' && url.pathname === '/api/console/reminders') return sendJson(response, 200, await reviewConsole.reminders(await readJson(request)));
+      const correction = url.pathname.match(/^\/api\/uploads\/(KP-[a-f0-9]{8})\/corrections$/);
+      if (request.method === 'POST' && correction) { const saved = await uploadCorrections.save(correction[1], await readJson(request, 4194304), { id: `web:${session.user}`, role: session.role }); return sendJson(response, 200, { ...saved, data: await reviewConsole.view() }); }
+      return sendJson(response, 404, { error: '接口不存在。' });
+    }
     const sourcePage = url.pathname.match(/^\/api\/knowledge-sources\/(KP-[a-f0-9]{8})\/pages\/([1-9][0-9]{0,5})$/);
     if (request.method === 'GET' && sourcePage) {
       const { bytes, mime } = await readKnowledgePage(repository, sourcePage[1], Number(sourcePage[2]), { withType: true });
@@ -149,7 +167,14 @@ const server = createServer(async (request, response) => {
       await handleApi(request, response, url, actor);
       return;
     }
-    await serveStatic(response, url.pathname);
+    if (url.pathname === '/' && session.role === 'admin') return redirect(response, '/console/');
+    if (url.pathname.startsWith('/console')) {
+      if (session.role !== 'admin') return sendJson(response, 403, { error: '只有管理员可查看工作台。' });
+      const domain = url.pathname.match(/^\/console\/(scheduler|date)\.js$/);
+      if (domain) { response.writeHead(200, { 'Content-Type': mimeTypes['.js'] }); return response.end(await readFile(path.join(__dirname, 'domain', `${domain[1]}.js`))); }
+      return await serveStatic(response, url.pathname === '/console/' ? '/console/index.html' : url.pathname);
+    }
+    await serveStatic(response, url.pathname === '/study' ? '/' : url.pathname);
   } catch (error) {
     console.error('HTTP request failed:', error.statusCode || 'internal_error');
     sendJson(response, error.statusCode || 500, { error: error.statusCode ? error.message : '请求失败，请稍后重试。' });

@@ -68,6 +68,7 @@ export class SourcePhotoService {
       if (Object.values(storage.drafts).filter(d => d.mode === MODE && inProgress.has(d.status)).length >= 100) throw fault('后台图片任务过多，请稍后重试。', 429);
       const id = `KP-${randomUUID().slice(0, 8)}`, now = new Date().toISOString();
       const job = { id, mode: MODE, scopeKey: scope.key, scope: clone(scope), sessionId: session.id, senderId: message.senderId,
+        learningKind: /遗忘|忘了|忘记|没记住/.test(message.text||'')?'forgotten':/新学|今天(?:学了|学习|刚学)/.test(message.text||'')?'learn':'record',
         sourceMessageId: message.messageId, sourceUploadedAt: uploadTimestamp(message.createTime) || now,
         createdAt: now, updatedAt: now, status: 'queued', stage: 'queued', assets, reads: [], versions: [], actions: [], attempts: 0 };
       storage.drafts[id] = job;
@@ -273,6 +274,7 @@ export class SourcePhotoService {
       }
     } else {
       storage.documents[job.id] = { id: job.id, scopeKey: job.scopeKey, materialKind: 'source_note', title: content.title,
+        learningKind: job.learningKind || 'record',
         uploadedAt: job.sourceUploadedAt, createdAt: now, currentVersion: 1, revisions: [revision], verification: clone(job.verification) };
     }
     job.versions = [{ version: 1, content: clone(content), verification: clone(job.verification), createdAt: now, delivered: false,

@@ -1,0 +1,34 @@
+name: 333-review-staging
+
+services:
+  app:
+    # This 896 MiB host cannot safely compile better-sqlite3 while production runs.
+    # Reuse the production dependency image when package-lock.json is unchanged.
+    image: 333-review-assistant-app:latest
+    restart: unless-stopped
+    init: true
+    mem_limit: 256m
+    pids_limit: 64
+    env_file:
+      - .env.staging.local
+    environment:
+      APP_REVISION: ${APP_REVISION:-unknown}
+      PORT: "3333"
+      HOST: 0.0.0.0
+      DATA_FILE: /data/review-assistant.json
+    ports:
+      - "127.0.0.1:3334:3333"
+    volumes:
+      - ./staging-runtime-data:/data
+      - ./apps/api:/app/apps/api:ro
+      - ./apps/web:/app/apps/web:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:3333/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

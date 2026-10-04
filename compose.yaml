@@ -1,7 +1,10 @@
 services:
   app:
+    image: ${REVIEW_APP_IMAGE:-333-review-assistant-app:latest}
     build:
       context: .
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
     restart: unless-stopped
     init: true
     env_file:
@@ -9,7 +12,8 @@ services:
     environment:
       PORT: "3333"
       HOST: 0.0.0.0
-      DATA_FILE: /data/review-assistant.json
+      DATA_FILE: /data/review-assistant.sqlite
+      DATA_FORMAT: relational-v1
     # Do not make the unauthenticated API public. Access it through an SSH
     # tunnel until application-level authentication is implemented.
     ports:

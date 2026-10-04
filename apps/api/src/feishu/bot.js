@@ -27,6 +27,7 @@ import { SourcePhotoModel } from '../knowledge/source-model.js';
 import { SourcePhotoVerifier } from '../knowledge/source-verifier.js';
 import { ClarificationService } from '../knowledge/clarifications.js';
 import { feishuIdentityConfig, identifySender, canReceivePrivate, identityDescription } from '../agent/identity.js';
+import { ReviewReminders } from './reminders.js';
 
 const validRatings = new Set(ratings);
 const GROUP_TEST_POLL_MS = 5_000;
@@ -1038,6 +1039,8 @@ export async function startFeishuBot({
     logger.warn(config.groupTestConfigurationError);
   }
   armGroupCheckinWatch();
+  const reminders = new ReviewReminders({ repository, send: channel.send.bind(channel), chatId: config.groupChatEnabled ? config.testGroupId : null, learnerId: config.learnerId, logger });
+  reminders.start();
   logger.log(`Feishu bot connected as ${channel.botIdentity?.name ?? 'bot'} (${config.groupChatEnabled ? 'group conversation + private' : config.groupTestEnabled ? 'private + one group check-in test' : 'single-user private test'} mode).`);
   return {
     status: 'connected',

@@ -1,9 +1,11 @@
 import Database from 'better-sqlite3';
 import { readFile } from 'node:fs/promises';
+import { readRelationalData } from './relational-codec.js';
 
 export const isSqliteFile = file => /\.(sqlite|db)$/i.test(file);
 
 export function readRows(db) {
+  if(db.prepare("SELECT name FROM sqlite_master WHERE name='runtime_fragments'").get()) return readRelationalData(db);
   const data = {};
   for (const { name, shape } of db.prepare('SELECT name,shape FROM collections').all()) {
     const values = db.prepare('SELECT value FROM records WHERE collection=? ORDER BY position').all(name).map(r => JSON.parse(r.value));

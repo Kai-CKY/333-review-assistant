@@ -15,7 +15,7 @@ async function fixture(t, env = {}) {
 
 test('HTTP protects all application routes and static assets, leaves health and login public', async t => {
   const s = await fixture(t);
-  for (const route of ['/api/dashboard', '/api/knowledge-points', '/api/feedback-jobs/fake', '/api/session', '/api/unknown']) {
+  for (const route of ['/api/dashboard', '/api/knowledge-points', '/api/feedback-jobs/fake', '/api/session', '/api/runtime', '/api/unknown']) {
     assert.equal((await fetch(s.url + route)).status, 401, route);
   }
   for (const route of ['/api/reviews', '/api/answer-attempts', '/api/logout']) {
@@ -112,11 +112,20 @@ test('proxy IP trust is opt-in and invalid forwarded headers fall back to socket
 });
 
 test('administrator Web account reads Yangyang data but cannot submit answers or ratings', async t => {
-  const s = await fixture(t, { WEB_ADMIN_USERS: 'tester' });
+  const s = await fixture(t, { WEB_ADMIN_USERS: 'tester', APP_REVISION: 'abc123def456' });
   const cookie = (await s.login()).headers.get('set-cookie').split(';')[0];
   const headers = { cookie, 'Content-Type': 'application/json' };
   assert.equal((await (await fetch(s.url + '/api/session', { headers })).json()).role, 'admin');
+  const runtime = await (await fetch(s.url + '/api/runtime', { headers })).json();
+  assert.equal(runtime.revision, 'abc123def456');
+  assert.equal(runtime.dataFormat, 'json');
   assert.equal((await fetch(s.url + '/api/dashboard', { headers })).status, 200);
   for (const route of ['/api/reviews', '/api/answer-attempts']) assert.equal((await fetch(s.url + route, { method: 'POST', headers, body: '{}' })).status, 403);
   assert.equal((await fetch(s.url + '/api/logout', { method: 'POST', headers, body: '{}' })).status, 200);
+});
+
+test('learner cannot read the running build revision', async t => {
+  const s = await fixture(t, { APP_REVISION: 'abc123def456' });
+  const cookie = (await s.login()).headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(s.url + '/api/runtime', { headers: { cookie } })).status, 403);
 });
