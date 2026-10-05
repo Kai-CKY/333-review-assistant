@@ -84,7 +84,7 @@ function completionMarkup(entry, index, dashboardDate) {
 function render(data) {
   state.dashboard = data;
   if (state.role === 'admin') document.querySelector('.topbar h1').textContent = '羊羊的学习进度与复习安排';
-  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const tasks = data.pendingReviews?.length ? data.pendingReviews : Array.isArray(data.tasks) ? data.tasks : [];
   const weakPoints = Array.isArray(data.weakPoints) ? data.weakPoints : [];
   const recentTaskCompletions = Array.isArray(data.recentTaskCompletions) ? data.recentTaskCompletions : [];
   const completedToday = Math.max(0, Number(data.completedToday) || 0);
@@ -94,7 +94,8 @@ function render(data) {
   document.querySelector('#exam-countdown').innerHTML = countdown === null
     ? '<span>考试日期</span><strong class="date-unset">待设置</strong>'
     : `<span>距暂定考试日</span><strong>${countdown}<small>天</small></strong>`;
-  const taskSummary = tasks.length ? `今日待复习 ${tasks.length} 个知识点。` : '今日暂无到期任务。';
+  const pendingCount = data.reviewStats?.pending ?? tasks.length;
+  const taskSummary = pendingCount ? `待复习 ${pendingCount} 个知识点。` : tasks.length ? `今日推荐 ${tasks.length} 项学习任务。` : '今日暂无到期任务。';
   const taskList = tasks.length ? tasks.map(taskMarkup).join('') : '<div class="empty">今天的到期任务已完成，可在知识索引查看下次复习日期。</div>';
   const completionList = recentTaskCompletions.length
     ? `<ol class="completion-list">${recentTaskCompletions.map((entry, index) => completionMarkup(entry, index, data.date)).join('')}</ol>`
@@ -120,7 +121,7 @@ function render(data) {
 
 async function openTask(taskId) {
   if (state.role === 'admin') return showStatus('管理员可查看羊羊的任务和记忆时间线；作答、自评由羊羊完成。', 'success');
-  const task = state.dashboard.tasks.find((item) => item.id === taskId);
+  const task = [...(state.dashboard.pendingReviews || []), ...state.dashboard.tasks].find((item) => item.id === taskId);
   if (!task) return;
   return openPoint(task.knowledgePointId);
 }

@@ -368,7 +368,7 @@ export async function startFeishuBot({
   async function showProgress(chatId) {
     const dashboard = await studyService.getDashboard();
     await channel.send(chatId, {
-      card: infoCard('今日进度', `今天完成了 **${dashboard.completedToday}** 次复习闭环，另有 **${dashboard.selfReportedCompletedToday}** 条任务完成自报；当前还有 **${dashboard.tasks.length}** 个候选任务。`, 'blue')
+      card: infoCard('今日进度', `今天完成了 **${dashboard.completedToday}** 次复习闭环，另有 **${dashboard.selfReportedCompletedToday}** 条任务完成自报；待复习 **${dashboard.reviewStats.pending}** 个知识点，今日推荐 **${dashboard.tasks.length}** 项。`, 'blue')
     });
   }
 
@@ -487,6 +487,7 @@ export async function startFeishuBot({
         runtimeSummary: {
           scopedMemoryNotes: (await sessionStore.memory.notes(sessionStore.scope(message.senderId, message.chatId))).map(n => n.text),
           date: dashboard.date,
+          reviewStats: dashboard.reviewStats,
           completedToday: dashboard.completedToday,
           todayTasks: dashboard.tasks.map((task) => ({ title: task.title, label: task.label, source: task.source })),
           weakPoints: dashboard.weakPoints.map((point) => ({ title: point.title, mastery: point.mastery })),
@@ -808,6 +809,7 @@ export async function startFeishuBot({
         const runtimeSummary = {
           scopedMemoryNotes: (await sessionStore.memory.notes(sessionStore.scope(message.senderId, message.chatId))).map(n => n.text),
           date: dashboard.date,
+          reviewStats: dashboard.reviewStats,
           completedToday: dashboard.completedToday,
           selfReportedCompletedToday: dashboard.selfReportedCompletedToday,
           todayTasks: dashboard.tasks.map((task) => ({ title: task.title, label: task.label, source: task.source })),
@@ -868,7 +870,7 @@ export async function startFeishuBot({
       const rows = readIntent === 'weaknesses' ? dashboard.weakPoints.map(p => p.title)
         : readIntent === 'completions' ? dashboard.recentTaskCompletions.map(p => `${p.reportedOn}：${p.content}`)
         : dashboard.tasks.map((p, i) => `${i + 1}. ${p.title}（${p.label}）`);
-      return send(`羊羊的学习数据（管理员只读）\n${dashboard.date}：已完成 ${dashboard.completedToday} 次复习，${dashboard.selfReportedCompletedToday} 条完成自报。\n${rows.join('\n') || '暂无记录。'}`);
+      return send(`羊羊的学习数据（管理员只读）\n${dashboard.date}：已完成 ${dashboard.completedToday} 次复习，${dashboard.selfReportedCompletedToday} 条完成自报；待复习 ${dashboard.reviewStats.pending} 个知识点。\n${rows.join('\n') || '暂无记录。'}`);
     }
     if (command || completionReportFrom(message.content) || /^\/(开始|开始复习)/.test(message.content)) {
       return send('你是系统管理员，不建立学习档案，也不代替羊羊作答、自评或写入完成记录。可以发送 /今日、/进度、/薄弱、/记录 查看羊羊的数据。');

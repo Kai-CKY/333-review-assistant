@@ -4,6 +4,8 @@ export function compactRuntime(value = {}) {
   const tasks = d.tasks || d.todayTasks || [];
   return { subject: value.subject, access: value.access, date: d.date, completedToday: d.completedToday,
     selfReportedCompletedToday: d.selfReportedCompletedToday, taskCount: tasks.length,
+    ...(d.reviewStats ? { reviewStats: Object.fromEntries(['enrolled', 'pending', 'scheduled', 'unstarted']
+      .map(key => [key, Math.max(0, Math.floor(Number(d.reviewStats[key]) || 0))])) } : {}),
     todayTasks: tasks.slice(0, 5).map(t => ({ title: String(t.title || '').slice(0, 160), label: t.label })),
     weakPoints: (d.weakPoints || []).slice(0, 3).map(p => ({ title: String(p.title || '').slice(0, 160), mastery: p.mastery })),
     recentTaskCompletions: (d.recentTaskCompletions || []).slice(0, 3).map(e => ({ reportedOn: e.reportedOn, content: String(e.content || '').slice(0, 300) })),

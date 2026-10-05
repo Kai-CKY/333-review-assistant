@@ -52,7 +52,7 @@ export function todayPlanCard(dashboard) {
   }
   card.body.elements.push({
     tag: 'markdown',
-    content: '先选一个知识点。回忆得不完整也没关系，系统会按你的自评安排下一次复习。'
+    content: `${dashboard.reviewStats ? `待复习 **${dashboard.reviewStats.pending}** 个知识点，以下是今日推荐。\n` : ''}先选一个知识点。回忆得不完整也没关系，系统会按你的自评安排下一次复习。`
   });
   dashboard.tasks.forEach((task, index) => {
     card.body.elements.push({

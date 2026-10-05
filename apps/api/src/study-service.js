@@ -1,5 +1,6 @@
 import { todayKey } from './domain/date.js';
 import { buildTodayPlan } from './domain/plan.js';
+import { reviewQueue } from './domain/review-queue.js';
 import { FeedbackService } from './feedback-service.js';
 import { activeStudyPoints } from './knowledge/library.js';
 import { taskForPoint, visiblePoint } from './knowledge/references.js';
@@ -53,6 +54,7 @@ export class StudyService {
       date,
       targetExamDate: data.user.targetExamDate,
       tasks,
+      ...reviewQueue(data, { targetDate: date }),
       completedToday,
       selfReportedCompletedToday,
       recentTaskCompletions,
