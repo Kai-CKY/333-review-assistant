@@ -14,3 +14,20 @@
 .editor-title-label select{border:1px solid var(--line);padding:9px 11px;background:#fbfcfd;border-radius:4px;font-size:11px;color:var(--ink)}.editor-title-label small{font-size:9px;line-height:1.7}.reminder-time input{border:1px solid var(--line);border-radius:4px;background:#fff;padding:6px;font-size:21px;color:var(--ink);max-width:150px}
 
 .sidebar>.admin{margin-top:auto}.detail form label{display:block;margin:12px 0}.detail form input,.detail form textarea,.detail form select{display:block;width:100%;padding:10px;border:1px solid #dce7ef;border-radius:8px}.detail form textarea{min-height:100px}
+
+/* Saved answers have their own row layout; .task reserves a narrow index column. */
+.answer-record{display:flex;align-items:center;gap:16px;width:100%;padding:17px 22px;border:0;border-bottom:1px solid var(--line);background:white;color:var(--ink);text-align:left}
+.answer-record:last-child{border-bottom:0}
+.answer-record:hover{background:#fafcfd}
+.answer-record-content{flex:1;min-width:0}
+.answer-record-title{display:block;font-size:13px;font-weight:600;line-height:1.6;overflow-wrap:anywhere}
+.answer-record-meta{display:block;margin-top:6px;font-size:10px;line-height:1.8;color:var(--soft);overflow-wrap:anywhere}
+.answer-record-arrow{flex:none;color:var(--blue);font-size:17px}
+.management-page .table-scroll{overflow-x:auto}
+.management-page table{width:100%;min-width:620px;border-collapse:collapse;text-align:left;font-size:12px;line-height:1.8}
+.management-page th,.management-page td{padding:14px 22px;border-bottom:1px solid var(--line);vertical-align:top}
+.management-page th{color:var(--soft);font-size:11px;font-weight:500;background:#fafcfd;white-space:nowrap}
+.management-page .text-button{border:0;background:transparent;padding:0;color:var(--blue);white-space:nowrap}
+.management-page .page-heading{flex-wrap:wrap}
+.management-page input[type=month]{max-width:100%;padding:8px;border:1px solid var(--line);border-radius:5px;color:var(--ink);background:white}
+@media(max-width:720px){.sidebar nav{max-width:100%;overflow-x:auto}.answer-record{padding:16px;gap:12px}.management-page th,.management-page td{padding:12px 16px}.management-page .page-heading>*{margin-bottom:12px}}
