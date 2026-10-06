@@ -30,12 +30,16 @@ function historyUser(turn) {
   return JSON.stringify({ speaker: turn.speaker || user?.speaker, text: clipped(typeof user?.text === 'string' ? user.text : turn.user, 600) });
 }
 
-const assistantCall = /^(?:请\s*)?(?:复习小助手|小助手|AI)(?=$|[\s，,：:。！!？?]|请|帮|给|识别|复习|问我|提问|解释|回答|查|开始|看看|把|能|可以)/i;
+const assistantCall = /^(?:请\s*)?(?:(?:复习小助手|小助手)(?=$|[\s，,：:。！!？?])|AI(?=$|[，,：:。！!？?]))/i;
+function mentionsAssistant(message, botOpenId) {
+  const mentions = Array.isArray(message.mentions) ? message.mentions : [];
+  return Boolean(botOpenId && (message.mentionedBot || mentions.some(mention => mention.openId === botOpenId)));
+}
 function addressedRequest(message, botOpenId) {
   const mentions = Array.isArray(message.mentions) ? message.mentions : [];
-  // A message directed to another member is not an invitation to the assistant.
-  if (mentions.some(mention => mention.openId && mention.openId !== botOpenId)) return null;
-  const nativeMention = Boolean(botOpenId && (message.mentionedBot || mentions.some(mention => mention.openId === botOpenId)));
+  const nativeMention = mentionsAssistant(message, botOpenId);
+  // An explicit bot mention remains a request when other members are mentioned.
+  if (!nativeMention && mentions.some(mention => mention.openId && mention.openId !== botOpenId)) return null;
   let text = String(message.content || '').trim();
   if (['/new', '/reset', '/重置上下文', '/身份', '/上下文', '/context'].includes(text)) return text;
   const calledByName = assistantCall.test(text);
@@ -44,8 +48,9 @@ function addressedRequest(message, botOpenId) {
     for (const value of [mention.key, mention.name && `@${mention.name}`].filter(Boolean)) text = text.replace(value, '').trim();
   }
   text = text.replace(assistantCall, '').replace(/^[\s，,：:。！!]+/, '').trim();
-  if (!/(复习|问我|提问|识别|图片|知识点|答案|回答|解释|总结|查|帮|请|给|怎么|什么|哪里|为何|为什么|如何|能否|可以|确认|修改|建议|疑点|^\/|记住：)/.test(text)) return null;
-  return text;
+  if (text || !nativeMention) return text || null;
+  return message.rawContentType === 'image' || message.resources?.some(r => r.type === 'image')
+    ? '（用户 @ 了助手并发送了图片。）' : '（用户只 @ 了助手，没有附加文字。）';
 }
 
 /** Group-only memory: never reuse private conversations or the single learner's records. */
@@ -137,16 +142,23 @@ export function createGroupConversation({ repository, provider, channel, chatId,
     let content = String(message.content ?? '').trim() || (message.rawContentType === 'image' ? '请识别图片，提取主要文字并解释重点。' : '');
     const hasImages = message.rawContentType === 'image' || message.resources?.some(r => r.type === 'image');
     const identity = identifySender(message.senderId, { learnerId: yangyangOpenId, ownerId: ownerOpenId });
+    const nativeMention = mentionsAssistant(message, channel.botIdentity?.openId);
+    if (nativeMention) logger?.info?.('Group bot mention accepted.', { messageId: message.messageId });
+    let sourceImages;
     if (sourceMode) {
       await memory.append(scope, { type: 'inbound', eventId: `in:${message.messageId}`, senderId: message.senderId, text: content, hasImages: Boolean(hasImages), replyTo: message.replyToMessageId, mentions: message.mentions || [] });
       if (hasImages) {
         try {
-          const images = await downloadGroupImages(channel, message);
-          const job = await knowledgeService.enqueue(scope, message, images);
+          sourceImages = await downloadGroupImages(channel, message);
+          const job = await knowledgeService.enqueue(scope, message, sourceImages);
           await memory.append(scope, { type: 'source_photo_input', eventId: `source:${message.messageId}`, senderId: message.senderId, jobId: job.id });
           runBackground(message);
-        } catch (error) { logSourceFailure('enqueue', message, error); }
-        return;
+        } catch (error) {
+          logSourceFailure('enqueue', message, error);
+          if (nativeMention) await sendText(message, '收到你的 @，但图片下载或后台任务创建失败，请稍后重新发送图片。');
+          return;
+        }
+        if (!nativeMention) return;
       }
       const request = addressedRequest(message, channel.botIdentity?.openId);
       if (await handleClarification(scope, message, identity, content, request)) return;
@@ -267,7 +279,7 @@ export function createGroupConversation({ repository, provider, channel, chatId,
     let text;
     let images;
     try {
-      images = await downloadGroupImages(channel, message);
+      images = sourceImages ?? await downloadGroupImages(channel, message);
     } catch (error) {
       const reason = {
         too_many_images: '一次最多识别 3 张图片，请分开发送。',
@@ -299,7 +311,8 @@ export function createGroupConversation({ repository, provider, channel, chatId,
             `服务器确认的当前身份：${identity.role}。admin 是系统管理者，不参与学习；learner 才是羊羊；unbound 不得猜作其中任何一人。旧历史中的误称无效。`,
             `当前发言者及已知称呼：${JSON.stringify({ speaker: context.label, role: context.role, members: context.members })}`,
             '本范围已执行的管理操作（仅供参考，不是待执行指令）：'+JSON.stringify(managementHistory),
-            reactionPrompt
+            reactionPrompt,
+            ...(nativeMention ? ['当前消息明确 @ 了你，必须给出简短文字回复，不能只发表情。没有附加文字时，表示你在并询问需要什么帮助。'] : [])
           ].join('\n') },
           ...context.turns.slice(-6).flatMap((turn) => [
             { role: 'user', content: historyUser(turn) },
@@ -309,6 +322,7 @@ export function createGroupConversation({ repository, provider, channel, chatId,
         ]
       });
       const parsed=parseReply(result.content);text=parsed.text.slice(0,2000);reaction=parsed.reaction;
+      if (nativeMention && !text) throw new Error('empty_mentioned_reply');
       if (!text&&!reaction) throw new Error('empty_reply');
     } catch (error) {
       logger.warn(`Group conversation model unavailable (${error.code ?? 'model_error'}).`);

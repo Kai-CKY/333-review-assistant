@@ -12,12 +12,12 @@ import { ClarificationService } from '../src/knowledge/clarifications.js';
 const scope = conversationScope({ appId: 'source-app', chatType: 'group', chatId: 'group' });
 const message = (id, content, more = {}) => ({ chatId: scope.chatId, chatType: 'group', senderId: 'learner', messageId: id, content, rawContentType: 'text', ...more });
 
-async function fixture(t, { downloadFailure = false, deliveryFailure = false, realClarifications = false } = {}) {
+async function fixture(t, { downloadFailure = false, deliveryFailure = false, realClarifications = false, modelFailure = false, modelContent = '知识点解答' } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'source-group-routing-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const repository = new LocalRepository(path.join(dir, 'data.json'));
   const memory = new ConversationMemory(repository);
-  const calls = { enqueue: [], worker: 0, model: [], next: [], bind: [], resolve: [], answer: [], defer: [], logs: [], sends: [] };
+  const calls = { enqueue: [], downloads: 0, worker: 0, model: [], next: [], bind: [], resolve: [], answer: [], defer: [], logs: [], sends: [] };
   let releaseWorker;
   const worker = new Promise(resolve => { releaseWorker = resolve; });
   t.after(releaseWorker);
@@ -45,7 +45,11 @@ async function fixture(t, { downloadFailure = false, deliveryFailure = false, re
     answer: async (id, body, actor, binding) => { calls.answer.push({ id, body, actor, binding }); return { ok: true, message: '已记下你的界定，原文保留；这不是事实核验。' }; },
     defer: async (id, actor, binding) => { calls.defer.push({ id, actor, binding }); return { ok: true, message: '已暂缓这个疑点。' }; }
   };
-  const provider = { isConfigured: () => true, complete: async req => { calls.model.push(req); return { content: '知识点解答' }; } };
+  const provider = { isConfigured: () => true, complete: async req => {
+    calls.model.push(req);
+    if (modelFailure) throw new Error('model_failed');
+    return { content: modelContent };
+  } };
   const channel = {
     botIdentity: { openId: 'bot', name: '复习小助手' },
     send: async (...args) => {
@@ -54,6 +58,7 @@ async function fixture(t, { downloadFailure = false, deliveryFailure = false, re
       return { messageId: `sent-${calls.sends.length}` };
     },
     rawClient: { im: { v1: { messageResource: { get: async () => {
+      calls.downloads++;
       if (downloadFailure) throw new Error('download_failed');
       return { getReadableStream: () => Readable.from([Buffer.from('/9j/2Q==', 'base64')]) };
     } } } } }
@@ -99,6 +104,68 @@ test('new source mode observes human conversation without responding and only ac
   await f.handle(message('native', '@复习小助手 请解释课程标准', { mentions: [{ openId: 'bot', name: '复习小助手' }], mentionedBot: true }));
   assert.equal(f.calls.model.length, 2);
   assert.deepEqual(f.calls.sends.map(call => call[2].replyTo), ['named', 'native']);
+});
+
+for (const [index, content] of ['夸夸羊羊', '她答得不错就夸夸 记住了吗', '你好', '谢谢', '嗯', '🙂'].entries()) {
+  test(`native bot mention always reaches the agent without a keyword gate: ${content}`, async t => {
+    const f = await fixture(t);
+    const id = `mention-${index}`;
+    await f.handle(message(id, content, { senderId: 'admin', mentions: [{ openId: 'bot', isBot: true }] }));
+    assert.equal(f.calls.model.length, 1);
+    assert.equal(JSON.parse(f.calls.model[0].messages.at(-1).content).text, content);
+    assert.match(f.calls.model[0].messages[0].content, /必须给出简短文字回复/);
+    assert.equal(f.calls.sends.length, 1);
+    assert.equal(f.calls.sends[0][2].replyTo, id);
+  });
+}
+
+test('empty native mentions and mixed member mentions still reach the agent', async t => {
+  const f = await fixture(t);
+  await f.handle(message('empty-mention', '@_user_1', { mentions: [{ openId: 'bot', key: '@_user_1' }] }));
+  await f.handle(message('flag-mention', '', { mentionedBot: true }));
+  await f.handle(message('mixed-mention', '夸夸羊羊', { mentions: [{ openId: 'learner' }, { openId: 'bot' }] }));
+  assert.equal(f.calls.model.length, 3);
+  assert.match(JSON.parse(f.calls.model[0].messages.at(-1).content).text, /没有附加文字/);
+  assert.match(JSON.parse(f.calls.model[1].messages.at(-1).content).text, /没有附加文字/);
+  assert.deepEqual(f.calls.sends.map(call => call[2].replyTo), ['empty-mention', 'flag-mention', 'mixed-mention']);
+});
+
+test('clear assistant name calls no longer require task keywords', async t => {
+  const f = await fixture(t);
+  await f.handle(message('named-praise', '小助手，夸夸羊羊'));
+  await f.handle(message('named-hello', '复习小助手，你好'));
+  assert.equal(f.calls.model.length, 2);
+  assert.deepEqual(f.calls.sends.map(call => call[2].replyTo), ['named-praise', 'named-hello']);
+});
+
+test('mentioned images enqueue in the background and receive an agent reply without downloading twice', async t => {
+  const f = await fixture(t);
+  await f.handle(message('mentioned-photo', '看这张图', { rawContentType: 'post', resources: [{ type: 'image', fileKey: 'resource' }], mentions: [{ openId: 'bot' }] }));
+  assert.equal(f.calls.enqueue.length, 1);
+  assert.equal(f.calls.worker, 1);
+  assert.equal(f.calls.downloads, 1);
+  assert.equal(f.calls.model.length, 1);
+  assert.equal(f.calls.model[0].messages.at(-1).content[1].image_url.url, f.calls.enqueue[0][2][0].image_url.url);
+  assert.equal(f.calls.sends.length, 1);
+  assert.equal(f.calls.sends[0][2].replyTo, 'mentioned-photo');
+});
+
+test('mentioned image download failures send an error reply', async t => {
+  const f = await fixture(t, { downloadFailure: true });
+  await f.handle(message('failed-mentioned-photo', '', { rawContentType: 'image', resources: [{ type: 'image', fileKey: 'resource' }], mentions: [{ openId: 'bot' }] }));
+  assert.equal(f.calls.model.length, 0);
+  assert.equal(f.calls.sends.length, 1);
+  assert.match(f.calls.sends[0][1].text, /失败/);
+});
+
+test('mentioned messages receive visible text when the model fails or returns only a reaction', async t => {
+  for (const options of [{ modelFailure: true }, { modelContent: '{"text":"","reaction":"CLAP"}' }]) {
+    const f = await fixture(t, options);
+    await f.handle(message('failed-mention', '夸夸羊羊', { mentions: [{ openId: 'bot' }] }));
+    assert.equal(f.calls.model.length, 1);
+    assert.equal(f.calls.sends.length, 1);
+    assert.match(f.calls.sends[0][1].text, /模型回复暂时不可用/);
+  }
 });
 
 test('review asks one short clarification and accepts only the learner explicit reply or invitation command', async t => {
