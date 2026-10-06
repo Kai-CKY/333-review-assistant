@@ -12,5 +12,3 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
 .editor-title-label select{border:1px solid var(--line);padding:9px 11px;background:#fbfcfd;border-radius:4px;font-size:11px;color:var(--ink)}.editor-title-label small{font-size:9px;line-height:1.7}.reminder-time input{border:1px solid var(--line);border-radius:4px;background:#fff;padding:6px;font-size:21px;color:var(--ink);max-width:150px}
-
-.sidebar>.admin{margin-top:auto}.detail form label{display:block;margin:12px 0}.detail form input,.detail form textarea,.detail form select{display:block;width:100%;padding:10px;border:1px solid #dce7ef;border-radius:8px}.detail form textarea{min-height:100px}

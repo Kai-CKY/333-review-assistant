@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { recordModelCall,withModelContext } from '../apps/api/src/model-usage.js';
 
 const output = 'docs/photo-ocr-test-2026-09-17';
 await mkdir(output, { recursive: true });
@@ -19,17 +20,22 @@ const url = new URL(`${process.env.ARK_BASE_URL.replace(/\/+$/, '')}/chat/comple
 if (url.protocol !== 'https:' || url.hostname !== 'ark.cn-beijing.volces.com') throw new Error('Unexpected API host');
 const start = Date.now();
 try {
+  const tracked=await withModelContext({taskId:'local-ocr-'+start,title:'本地图片识读',purpose:'photo'},()=>recordModelCall({api:'Chat',model:process.env.ARK_MODEL_ID,purpose:'photo',step:'ocr-test',thinking:'disabled',maxTokens:10000},async observe=>{
   const response = await fetch(url, {
     method: 'POST', signal: AbortSignal.timeout(180000),
     headers: { authorization: `Bearer ${process.env.ARK_API_KEY}`, 'content-type': 'application/json' },
     body: JSON.stringify({ model: process.env.ARK_MODEL_ID, temperature: 0.1, max_tokens: 10000, thinking: { type: 'disabled' }, messages: [{ role: 'system', content: prompt }, { role: 'user', content: inputs }] })
   });
+  if(!response.ok)throw Object.assign(new Error('upstream_error'),{code:'upstream_'+response.status});
+  const data=await response.json();await observe(data);return {response,data};
+  }));
+  const {response,data}=tracked;
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     console.log(JSON.stringify({ status: 'failed', httpStatus: response.status, code: error?.error?.code }));
     process.exitCode = 1;
   } else {
-    const data = await response.json();
+    // Usage was persisted before transcription processing.
     await writeFile(`${output}/doubao-response.json`, JSON.stringify(data, null, 2));
     await writeFile(`${output}/doubao-transcription.md`, data.choices[0].message.content);
     await writeFile(`${output}/run-manifest.json`, JSON.stringify({ at: new Date().toISOString(), model: data.model, requestedModel: process.env.ARK_MODEL_ID, latencyMs: Date.now()-start, usage: data.usage, finishReason: data.choices[0].finish_reason, prompt, images: manifests, openaiSide: 'Current Codex conversation visual reading; no standalone OpenAI API call' }, null, 2));

@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readDatabaseFile, isSqliteFile } from './database-file.js';
 import { SqliteRepository } from './sqlite-repository.js';
+import Database from 'better-sqlite3';
+import { RelationalRepository } from './relational-repository.js';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function absent(file) { try { await access(file); throw new Error('destination_exists'); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
@@ -29,6 +31,15 @@ export async function backupRuntime({ databaseFile, outputDir, serverStopped = f
   await mkdir(path.join(outputDir, 'blobs'), { recursive: true });
   const manifest = { format: '333-runtime-backup', version: 1, createdAt: new Date().toISOString(), database: { sha256: hash(serialized) }, files: [] };
   await writeFile(path.join(outputDir, 'database.json'), serialized, { flag: 'wx', mode: 0o600 });
+  if(isSqliteFile(databaseFile)){
+    const db=new Database(databaseFile,{readonly:true,fileMustExist:true});
+    try {
+      if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='runtime_fragments'").get()){
+        await db.backup(path.join(outputDir,'runtime.sqlite'));
+        manifest.database.format='relational-v1';manifest.database.nativeSha256=hash(await readFile(path.join(outputDir,'runtime.sqlite')));
+      }
+    }finally{db.close();}
+  }
   for (const file of files) {
     const bytes = await readFile(file.full), sha256 = hash(bytes);
     try { await writeFile(path.join(outputDir, 'blobs', sha256), bytes, { flag: 'wx', mode: 0o600 }); }
@@ -47,6 +58,14 @@ export async function restoreRuntime({ backupDir, outputDir, sqlite = true }) {
   const bytes = await readFile(path.join(backupDir, 'database.json'));
   if (hash(bytes) !== manifest.database?.sha256) throw new Error('backup_database_corrupt');
   const data = JSON.parse(bytes);
+  let native;
+  if(manifest.database.format==='relational-v1'){
+    native=await readFile(path.join(backupDir,'runtime.sqlite'));
+    if(hash(native)!==manifest.database.nativeSha256)throw new Error('backup_native_database_corrupt');
+    const check=new Database(path.join(backupDir,'runtime.sqlite'),{readonly:true,fileMustExist:true});
+    try{if(check.pragma('integrity_check',{simple:true})!=='ok'||check.pragma('foreign_key_check').length)throw new Error('backup_native_database_invalid');}finally{check.close();}
+    if(!sqlite)throw new Error('relational_backup_requires_native_restore');
+  }
   for (const file of manifest.files) {
     if (!/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.path !== 'string' || !/^(knowledge-assets|knowledge-library)\//.test(file.path) ||
       file.path.includes('\\') || file.path.includes(':') || file.path.split('/').some(p => !p || p === '.' || p === '..')) throw new Error('unsafe_backup_path');
@@ -64,7 +83,17 @@ export async function restoreRuntime({ backupDir, outputDir, sqlite = true }) {
   // Saved archive directories are location metadata; historical IDs/timestamps stay unchanged.
   for (const draft of Object.values(data.photoKnowledge?.drafts || {})) if (draft.importProvenance?.archiveDir) draft.importProvenance.archiveDir = path.join(outputDir, 'knowledge-library', draft.id);
   const databaseFile = path.join(outputDir, sqlite ? 'review-assistant.sqlite' : 'review-assistant.json');
-  if (isSqliteFile(databaseFile)) {
+  if(native){
+    await writeFile(databaseFile,native,{flag:'wx',mode:0o600});
+    const repository=new RelationalRepository(databaseFile);
+    try{
+      await repository.mutate(restored=>{
+        for(const draft of Object.values(restored.photoKnowledge?.drafts||{}))if(draft.importProvenance?.archiveDir)draft.importProvenance.archiveDir=path.join(outputDir,'knowledge-library',draft.id);
+      });
+      if(repository.db.pragma('integrity_check',{simple:true})!=='ok'||repository.db.pragma('foreign_key_check').length)throw new Error('restore_integrity_failed');
+    }finally{repository.close();}
+  }
+  else if (isSqliteFile(databaseFile)) {
     const repository = new SqliteRepository(databaseFile);
     try { await repository.save(data); if (repository.db.pragma('integrity_check', { simple: true }) !== 'ok') throw new Error('restore_integrity_failed'); }
     finally { repository.close(); }

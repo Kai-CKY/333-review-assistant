@@ -589,7 +589,7 @@ test('Feishu narrow group check-in waits for the configured target, sends once, 
   }
 });
 
-test('Feishu gate, DONE receipt, fast chat and self-report writes stay within their boundaries', async () => {
+test('Feishu gate, no automatic receipt, fast chat and self-report writes stay within their boundaries', async () => {
   const repository = await temporaryRepository('review-bot-');
   const modelProvider = {
     isConfigured: () => true,
@@ -674,7 +674,7 @@ test('Feishu gate, DONE receipt, fast chat and self-report writes stay within th
       chatType: 'p2p', senderId: 'ou_yangyang', chatId: 'oc_private', messageId: 'om_2', rawContentType: 'text', content: '你好'
     });
     assert.deepEqual(calls, { classify: 0, chat: 0, coach: 0 });
-    assert.deepEqual(reactions, [['om_2', 'DONE']]);
+    assert.deepEqual(reactions, []);
     assert.equal((await repository.read()).answerAttempts.length, 0);
 
     const store = new FeishuSessionStore(repository);
@@ -708,10 +708,7 @@ test('Feishu gate, DONE receipt, fast chat and self-report writes stay within th
     assert.equal(afterCompletion.answerAttempts.length, 0);
     assert.equal((await store.getActive('ou_yangyang')).status, 'awaiting_answer');
     assert.deepEqual(calls, { classify: 0, chat: 0, coach: 0 });
-    assert.deepEqual(reactions.slice(1, 3), [
-      ['om_completion', 'DONE'],
-      ['om_completion', 'DONE']
-    ]);
+    assert.deepEqual(reactions, []);
 
     await handlers.cardAction({
       chatId: 'oc_private',

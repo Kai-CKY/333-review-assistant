@@ -322,4 +322,4 @@ window.addEventListener('focus', refresh);
 
 document.querySelector('#save-answer').addEventListener('click', () => saveAnswer().catch((error) => showStatus(error.message, 'warning')));
 document.querySelectorAll('[data-rating]').forEach((button) => button.addEventListener('click', () => rate(button.dataset.rating).catch((error) => showStatus(error.message, 'warning'))));
-loadDashboard();
+loadDashboard().then(async()=>{const point=new URLSearchParams(location.search).get('point');if(point&&state.role==='learner')await openPoint(point);}).catch(error=>showStatus(error.message,'warning'));

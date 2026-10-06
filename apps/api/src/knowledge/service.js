@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ConversationMemory } from '../agent/memory.js';
 import { savedItems, searchSavedItems, uploadTimestamp } from './library.js';
+import { withModelContext } from '../model-usage.js';
 
 function state(data) { return data.photoKnowledge ??= { schemaVersion: 1, drafts: {}, documents: {}, events: [] }; }
 const SAFE_ERROR_CODES = new Set([
@@ -89,6 +90,9 @@ export class PhotoKnowledgeService {
   }
   async patch(id, callback) { return this.repository.mutate(data => callback(state(data).drafts[id])); }
   async process(scope, message, images) {
+    return withModelContext({taskId:'photo:'+message.messageId,scopeKey:scope.key,title:'图片整理',purpose:'photo'},()=>this.processObserved(scope,message,images));
+  }
+  async processObserved(scope, message, images) {
     const session = await this.memory.session(scope);
     const draft = await this.repository.mutate(data => {
       const store = state(data), prior = Object.values(store.drafts).find(d => d.scopeKey === scope.key && d.sourceMessageId === message.messageId);

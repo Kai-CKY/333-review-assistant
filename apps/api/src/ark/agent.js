@@ -2,6 +2,8 @@ import { ArkFeedbackError, ArkFeedbackProvider } from './feedback.js';
 import { knowledgeContextRule } from '../knowledge/library.js';
 import { KnowledgeTools } from '../agent/knowledge-tools.js';
 import { compactRuntime, coachingReference } from '../agent/context-builder.js';
+import { parseReply, reactionPrompt, reactionIds } from '../agent/reactions.js';
+import { markModelResult } from '../model-usage.js';
 import {
   coachingSystemPrompt,
   conversationSystemPrompt,
@@ -19,7 +21,7 @@ const allowedIntents = new Set([
   'help',
   'ambiguous'
 ]);
-const allowedRouteKeys = new Set(['schema_version', 'intent', 'reply', 'task_query', 'confidence']);
+const allowedRouteKeys = new Set(['schema_version', 'intent', 'reply', 'task_query', 'confidence','reaction']);
 
 function clip(value, maximum) {
   const text = typeof value === 'string' ? value.trim() : '';
@@ -51,6 +53,7 @@ function validateRoute(route) {
     reply: clip(route.reply, 240),
     taskQuery: route.task_query ? clip(route.task_query, 120) : null,
     confidence: route.confidence
+    ,reaction:reactionIds.has(route.reaction)?route.reaction:null
   };
 }
 
@@ -79,10 +82,11 @@ export class ArkStudyAgent {
 
   async classify({ message, profile, activeSession = null, runtimeSummary = null, history = [] }) {
     const result = await this.provider.complete({
+      purpose: 'intent',
       temperature: 0,
       maxTokens: 260,
       messages: [
-        { role: 'system', content: `${intentSystemPrompt(profile)}\n${knowledgeContextRule}` },
+        { role: 'system', content: `${intentSystemPrompt(profile)}\n${knowledgeContextRule}\n可增加 reaction 字段，选 THUMBSUP、SMILE、CLAP、MUSCLE、HEART 或 null，仅交流时按需选择。` },
         {
           role: 'user',
           content: JSON.stringify({
@@ -98,29 +102,32 @@ export class ArkStudyAgent {
         }
       ]
     });
-    return validateRoute(parseJsonObject(result.content));
+    try{const route=validateRoute(parseJsonObject(result.content));await markModelResult(result.requestId,'success');return route;}
+    catch(error){await markModelResult(result.requestId,'parse_failed');throw error;}
   }
 
   async chat({ message, profile, runtimeSummary, history = [] }) {
     const result = await this.provider.complete({
+      purpose: 'chat',
       temperature: 0.35,
       maxTokens: 260,
       messages: [
-        { role: 'system', content: `${conversationSystemPrompt(profile, compactRuntime(runtimeSummary || {}))}\n${knowledgeContextRule}` },
+        { role: 'system', content: `${conversationSystemPrompt(profile, compactRuntime(runtimeSummary || {}))}\n${knowledgeContextRule}\n${reactionPrompt}` },
         ...historyMessages(history),
         { role: 'user', content: JSON.stringify({ saved_knowledge: await this.knowledge(message, profile) }) },
         { role: 'user', content: clip(message, 3_000) }
       ]
     });
-    return { text: clip(result.content, 800), modelId: result.modelId };
+    return this.parsedReply(result,800);
   }
 
   async coach({ message, profile, task, history = [] }) {
     const result = await this.provider.complete({
+      purpose: 'coaching',
       temperature: 0.25,
       maxTokens: 220,
       messages: [
-        { role: 'system', content: `${coachingSystemPrompt(profile)}\n${knowledgeContextRule}` },
+        { role: 'system', content: `${coachingSystemPrompt(profile)}\n${knowledgeContextRule}\n${reactionPrompt}` },
         ...historyMessages(history),
         {
           role: 'user',
@@ -133,6 +140,10 @@ export class ArkStudyAgent {
         }
       ]
     });
-    return { text: clip(result.content, 1_000), modelId: result.modelId };
+    return this.parsedReply(result,1000);
+  }
+  async parsedReply(result,maximum){
+    try{const reply=parseReply(result.content);await markModelResult(result.requestId,'success');return {...reply,text:clip(reply.text,maximum),modelId:result.modelId};}
+    catch(error){await markModelResult(result.requestId,'parse_failed');throw error;}
   }
 }

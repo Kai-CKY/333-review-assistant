@@ -119,11 +119,11 @@ export class FeedbackService {
         attempt: claim.attempt,
         sourceSnapshot: claim.job.sourceSnapshot
       });
-      const result = await this.provider.reviewAnswer({
+      const result = await withModelContext({taskId:claim.job.id,attemptId:claim.attempt.id,purpose:'feedback',title:claim.job.taskSnapshot?.title||'答题反馈'},()=>this.provider.reviewAnswer({
         task: claim.job.taskSnapshot ?? {},
         answer,
         profile: profile && typeof profile === 'object' ? profile : {}
-      });
+      }));
       if (!text(result?.feedback)) throw invalidFeedbackError();
 
       return await this.repository.completeFeedbackJob({
@@ -208,3 +208,4 @@ export class FeedbackService {
     return { job, feedback: null, errorCode: code };
   }
 }
+import { withModelContext } from './model-usage.js';

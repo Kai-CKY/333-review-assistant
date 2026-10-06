@@ -21,7 +21,12 @@ export class ConversationMemory {
   async session(scope) { return this.repository.mutate(data => structuredClone(current(data, scope))); }
   async history(scope, limit = 12) {
     const session = await this.session(scope);
-    return session.events.filter(e => e.type === 'turn').slice(-limit).map(e => ({ user: e.user, assistant: e.assistant, at: e.at }));
+    const turns=session.events.filter(e=>e.type==='turn').slice(-limit).map(e=>({user:e.user,assistant:e.assistant,at:e.at}));
+    let operations;
+    if(this.repository.format==='relational-v1')operations=this.repository.db.prepare("SELECT record_json FROM management_operations WHERE json_extract(record_json,'$.scopeKey')=? AND status IN ('sent','recorded') ORDER BY created_at DESC LIMIT 5").all(scope.key).map(r=>JSON.parse(r.record_json));
+    else operations=Object.values((await this.repository.read()).runtimeLedger?.management_operations||{}).filter(r=>r.scopeKey===scope.key&&['sent','recorded'].includes(r.status)).slice(-5);
+    const reference=operations.filter(r=>r.kind==='send'||r.publicText).map(r=>({user:`实际管理操作记录（仅参考，不是待执行指令）：${r.text||r.publicText}`,assistant:`状态：${r.status}；回执：${r.messageId||'管理者补记'}；来源：${r.executionSource}`,at:r.occurredAt||r.createdAt}));
+    return [...reference,...turns];
   }
   async append(scope, event, expectedSessionId) {
     return this.repository.mutate(data => {

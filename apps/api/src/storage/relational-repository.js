@@ -4,6 +4,7 @@ import path from 'node:path';
 import { LocalRepository, normalizeData } from '../repository.js';
 import { syncSavedKnowledge, searchSavedItems } from '../knowledge/library.js';
 import { readRelationalData, writeRelationalData } from './relational-codec.js';
+import { migrateRuntime } from './runtime-migrations.js';
 
 export class RelationalRepository extends LocalRepository {
   constructor(filePath,options) {
@@ -12,6 +13,7 @@ export class RelationalRepository extends LocalRepository {
     this.db.pragma('journal_mode = WAL');this.db.pragma('foreign_keys = ON');this.db.pragma('busy_timeout = 5000');
     const schema=readFileSync(new URL('./relational-schema.sql',import.meta.url),'utf8').replaceAll('CREATE TABLE ','CREATE TABLE IF NOT EXISTS ').replaceAll('CREATE INDEX ','CREATE INDEX IF NOT EXISTS ');
     this.db.exec(schema.replaceAll('IF NOT EXISTS IF NOT EXISTS','IF NOT EXISTS'));
+    migrateRuntime(this.db);
     this.format='relational-v1';
   }
   async load() {

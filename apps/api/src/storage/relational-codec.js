@@ -111,8 +111,8 @@ export function writeRelationalData(db,data,policy={}) {
     const columns={id:row.id||stableId(table,i),snapshot_json:json(row)};
     if(table!=='answer_feedbacks') columns.person_id=learner;
     if(['review_logs','answer_attempts'].includes(table)) columns.knowledge_point_id=pointIds.has(row.knowledgePointId)?row.knowledgePointId:null;
-    if(table==='review_logs') Object.assign(columns,{rating:row.rating,reviewed_on:row.reviewedOn});
-    if(table==='answer_attempts') Object.assign(columns,{answer_text:row.content||row.answer,created_at:row.createdAt});
+    if(table==='review_logs') Object.assign(columns,{rating:row.rating,reviewed_on:row.reviewedOn,reviewed_at:row.reviewedAt,recorded_at:row.recordedAt,attempt_id:row.attemptId});
+    if(table==='answer_attempts') Object.assign(columns,{answer_text:row.content||row.answer,created_at:row.createdAt,submitted_at:row.submittedAt,actor_id:row.actorId});
     if(table==='answer_feedbacks') Object.assign(columns,{attempt_id:row.attemptId,status:row.status,created_at:row.createdAt});
     if(table==='task_completion_logs') Object.assign(columns,{reported_on:row.reportedOn,content:row.content});
     put(table,columns);

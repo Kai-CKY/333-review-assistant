@@ -139,6 +139,11 @@ export function normalizeData(data) {
       changed = true;
     }
   }
+  for(const state of data.reviewStates){
+    if(state.lastRating!==undefined)continue;
+    const last=data.reviewLogs.filter(r=>r.knowledgePointId===state.knowledgePointId&&r.reviewedOn===state.lastReviewedOn).at(-1);
+    if(last&&['again','hard','good','easy'].includes(last.rating)){state.lastRating=last.rating;changed=true;}
+  }
   return changed;
 }
 
@@ -191,7 +196,7 @@ export class LocalRepository {
     return operation;
   }
 
-  async recordReview({ knowledgePointId, rating, reviewedOn = todayKey(), sourceId }) {
+  async recordReview({ knowledgePointId, rating, reviewedOn = todayKey(), sourceId, attemptId=null, actorId=null }) {
     return this.mutate((data) => {
       const knowledgePoint = data.knowledgePoints.find((item) => item.id === knowledgePointId);
       if (!knowledgePoint || knowledgePoint.archived || knowledgePoint.hidden || knowledgePoint.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
@@ -210,7 +215,9 @@ export class LocalRepository {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewedOn) || !Number.isFinite(Date.parse(`${reviewedOn}T00:00:00Z`)) || new Date(`${reviewedOn}T00:00:00Z`).toISOString().slice(0, 10) !== reviewedOn || (existing.forgettingAnchorOn && reviewedOn < existing.forgettingAnchorOn)) {
         throw Object.assign(new Error('复习日期无效或早于本次遗忘日期。'), { statusCode: 400 });
       }
-      const next = scheduleReview(existing, rating, reviewedOn);
+      const linked=attemptId?data.answerAttempts.find(a=>a.id===attemptId):sourceId?.startsWith('review:')?data.answerAttempts.find(a=>a.sourceId===sourceId.slice(7)):null;
+      if(attemptId&&!linked||linked&&(linked.knowledgePointId!==knowledgePointId||actorId&&linked.actorId&&linked.actorId!==actorId))throw Object.assign(new Error('作答与自评关联无效'),{statusCode:400});
+      const next = {...scheduleReview(existing, rating, reviewedOn),lastRating:rating};
       data.reviewStates = data.reviewStates.filter((item) => item.knowledgePointId !== knowledgePointId);
       data.reviewStates.push(next);
       const reviewLog = {
@@ -218,6 +225,7 @@ export class LocalRepository {
         knowledgePointId,
         rating,
         reviewedOn,
+        reviewedAt:new Date().toISOString(),recordedAt:new Date().toISOString(),attemptId:linked?.id||null,actorId,
         nextReviewOn: next.nextReviewOn,
         ...(sourceId ? { sourceId } : {})
       };
@@ -226,7 +234,7 @@ export class LocalRepository {
     });
   }
 
-  async saveAnswer({ knowledgePointId, content, submittedOn = todayKey(), sourceId, feedbackStatus = 'not_requested', taskSnapshot = null, practiceSessionId = null }) {
+  async saveAnswer({ knowledgePointId, content, submittedOn = todayKey(), sourceId, feedbackStatus = 'not_requested', taskSnapshot = null, practiceSessionId = null, actorId=null }) {
     return this.mutate((data) => {
       const point = data.knowledgePoints.find(item => item.id === knowledgePointId);
       if (!point || point.archived || point.hidden || point.practiceEligible === false) throw Object.assign(new Error('该知识点暂不可练习，请刷新知识索引。'), { statusCode: 400 });
@@ -240,6 +248,7 @@ export class LocalRepository {
         knowledgePointId,
         content: content.trim(),
         submittedOn,
+        submittedAt:new Date().toISOString(),recordedAt:new Date().toISOString(),actorId,
         feedbackStatus,
         taskSnapshot: cloneValue(taskSnapshot), practiceSessionId,
         ...(sourceId ? { sourceId } : {})

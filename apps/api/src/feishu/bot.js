@@ -28,6 +28,8 @@ import { SourcePhotoVerifier } from '../knowledge/source-verifier.js';
 import { ClarificationService } from '../knowledge/clarifications.js';
 import { feishuIdentityConfig, identifySender, canReceivePrivate, identityDescription } from '../agent/identity.js';
 import { ReviewReminders } from './reminders.js';
+import { withModelContext } from '../model-usage.js';
+import { sendReactionOnce } from '../agent/reactions.js';
 
 const validRatings = new Set(ratings);
 const GROUP_TEST_POLL_MS = 5_000;
@@ -175,7 +177,9 @@ export async function startFeishuBot({
   const modelReplyQueues = new Map();
   const originalSend = channel.send.bind(channel);
   channel.send = async (chatId, payload, options) => {
-    const sent = await originalSend(chatId, payload, options);
+    const {reaction,...sendOptions}=options||{};
+    const sent = await originalSend(chatId, payload, sendOptions);
+    if(reaction)try{await sendReactionOnce(repository,channel,sendOptions.replyTo,reaction,logger);}catch{logger.warn('reaction_record_failed');}
     const message = sessionStore.context.getStore();
     if (message?.chatType === 'p2p' && message.chatId === chatId && canReceivePrivate(message.senderId, config)) {
       await sessionStore.memory.append(sessionStore.scope(message.senderId, chatId), { type: 'outbound', text: payload.text || JSON.stringify(payload.card || {}), replyTo: options?.replyTo, messageId: sent?.messageId });
@@ -208,15 +212,7 @@ export async function startFeishuBot({
   }
 
   function acknowledgeMessage(messageId) {
-    if (!receiptReactionAvailable || !messageId) return;
-    void channel.addReaction(messageId, 'DONE')
-      .then(() => { receiptReactionFailureLogged = false; })
-      .catch((error) => {
-        if (!receiptReactionFailureLogged) {
-          receiptReactionFailureLogged = true;
-          logger.warn(`Feishu DONE receipt reaction is unavailable (${safeErrorCode(error)}).`);
-        }
-      });
+    // Receipt is not a model-selected reaction. Do not automatically react.
   }
 
   function armGroupCheckinWatch() {
@@ -464,8 +460,9 @@ export async function startFeishuBot({
     });
   }
 
-  async function rememberAndSend({ chatId, openId, userText, assistantText, replyTo }) {
-    await channel.send(chatId, { text: assistantText }, replyTo ? { replyTo } : undefined);
+  async function rememberAndSend({ chatId, openId, userText, assistantText, replyTo, reaction=null }) {
+    if(assistantText)await channel.send(chatId, { text: assistantText }, {replyTo,reaction});
+    else if(reaction)await sendReactionOnce(repository,channel,replyTo,reaction,logger);
     await sessionStore.rememberConversationTurn({ openId, chatId, userText, assistantText });
   }
 
@@ -505,6 +502,7 @@ export async function startFeishuBot({
         openId: message.senderId,
         userText: message.content,
         assistantText: result.text,
+        reaction:result.reaction,
         replyTo: message.messageId
       });
     } catch (error) {
@@ -526,7 +524,7 @@ export async function startFeishuBot({
         sessionStore.getConversationHistory(openId, chatId)
       ]);
       const result = await naturalAgent.coach({ message: userText, profile, task, history });
-      await rememberAndSend({ chatId, openId, userText, assistantText: result.text, replyTo });
+      await rememberAndSend({ chatId, openId, userText, assistantText: result.text, replyTo, reaction:result.reaction });
     } catch (error) {
       logger.warn(`Coaching reply is unavailable (${safeErrorCode(error)}).`);
       await channel.send(chatId, { text: '练习建议：先列出你能想到的 3 个关键词，我再帮你组织。' }, { replyTo });
@@ -563,6 +561,7 @@ export async function startFeishuBot({
         knowledgePointId: claim.session.task.knowledgePointId,
         content: answer,
         taskSnapshot: claim.session.task,
+        actorId: `feishu:${openId}`,
         sourceId: claim.session.answerSourceId
       });
       const completed = await sessionStore.finishAnswer({
@@ -706,7 +705,7 @@ export async function startFeishuBot({
       const result = await studyService.recordReview({
         knowledgePointId: claim.session.task.knowledgePointId,
         rating: claim.session.rating,
-        sourceId: claim.session.ratingSourceId
+        sourceId: claim.session.ratingSourceId,attemptId:claim.session.answerAttemptId||null,actorId:`feishu:${openId}`
       });
       const completed = await sessionStore.finishRating({
         sessionId: claim.session.id,
@@ -848,6 +847,7 @@ export async function startFeishuBot({
           openId: message.senderId,
           userText: message.content,
           assistantText,
+          reaction:decision.reaction,
           replyTo: message.messageId
         });
       } catch (error) {
@@ -883,12 +883,13 @@ export async function startFeishuBot({
       const scope = sessionStore.scope(message.senderId, message.chatId);
       const result = await naturalAgent.chat({ message: message.content, profile: identity,
         runtimeSummary: { subject: '羊羊', access: 'read_only', dashboard }, history: await sessionStore.memory.history(scope) });
-      await send(result.text);
+      if(result.text)await send(result.text);
+      if(result.reaction)await sendReactionOnce(repository,channel,message.messageId,result.reaction,logger);
       await sessionStore.memory.append(scope, { type: 'turn', eventId: message.messageId, user: message.content, assistant: result.text });
     });
   }
 
-  channel.on('message', (message) => sessionStore.withMessage(message, async () => {
+  channel.on('message', (message) => withModelContext({taskId:`feishu:${message.messageId}`,title:message.chatType==='group'?'群聊回复':'私聊回复'},()=>sessionStore.withMessage(message, async () => {
     if (message.chatType === 'group') {
       if (!config.groupChatEnabled || message.chatId !== config.testGroupId) return;
       if (!message.senderId || message.senderId === channel.botIdentity?.openId) return;
@@ -961,7 +962,7 @@ export async function startFeishuBot({
 
     if (active) return handleActiveNatural(message, active);
     return handleInactiveNatural(message);
-  }));
+  })));
 
   channel.on('cardAction', async (event) => {
     if (!canReceivePrivate(event.operator.openId, config)) return;

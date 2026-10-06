@@ -174,6 +174,9 @@ export class SourcePhotoService {
   }
 
   async run(id) {
+    return withModelContext({taskId:id,title:`图片整理 ${id}`,purpose:'photo'},()=>this.runObserved(id));
+  }
+  async runObserved(id) {
     const runId = randomUUID();
     let job = await this.repository.mutate(data => {
       const current = store(data).drafts[id];
@@ -285,3 +288,4 @@ export class SourcePhotoService {
     storage.events.push({ type: existing ? 'source_rechecked' : 'source_archived', id: job.id, scopeKey: job.scopeKey, at: now });
   }
 }
+import { withModelContext } from '../model-usage.js';

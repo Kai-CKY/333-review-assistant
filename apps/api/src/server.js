@@ -16,10 +16,20 @@ import { SourcePhotoVerifier } from './knowledge/source-verifier.js';
 import { readKnowledgePage } from './knowledge/source-pages.js';
 import { ReviewConsole } from './review-console.js';
 import { UploadCorrections } from './knowledge/upload-corrections.js';
+import { RuntimeLedger, csvRequests, filterRequests } from './runtime-ledger.js';
+import { configureModelLedger, replayUsagePending, withModelContext } from './model-usage.js';
+import { ManagementOperations } from './management-operations.js';
+import { ReviewRecords } from './review-records.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, '../../web');
 const repository = await openRepository(process.env.DATA_FILE ? path.resolve(process.env.DATA_FILE) : path.resolve(__dirname, '../../../.data/review-assistant.json'));
+const runtimeLedger=new RuntimeLedger(repository);
+configureModelLedger(runtimeLedger);
+try{await replayUsagePending(runtimeLedger);}catch{console.warn('model_usage_replay_failed');}
+await runtimeLedger.initialize();
+const management=new ManagementOperations(repository,runtimeLedger);
+const reviewRecords=new ReviewRecords(repository);
 const modelProvider = new ArkFeedbackProvider();
 const studyAgent = new ArkStudyAgent({ provider: modelProvider, repository });
 const webAuth = createWebAuth();
@@ -94,6 +104,26 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname.startsWith('/api/console') || /^\/api\/uploads\//.test(url.pathname)) {
       if (session.role !== 'admin') return sendJson(response, 403, { error: '只有管理员可查看工作台或校正记录。' });
+      const actor={id:`web:${session.user}`,role:session.role};
+      const query=Object.fromEntries(url.searchParams);
+      if(request.method==='GET'&&url.pathname==='/api/console/costs')return sendJson(response,200,await runtimeLedger.view(query));
+      if(request.method==='GET'&&url.pathname==='/api/console/costs/export.csv'){
+        const view=await runtimeLedger.view(query);
+        const rows=filterRequests(await runtimeLedger.rows('model_requests',{environment:view.environment,from:view.from,to:view.to}),query);
+        response.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="333-model-costs.csv"'});return response.end(csvRequests(rows));
+      }
+      const costDetail=url.pathname.match(/^\/api\/console\/costs\/(requests|tasks)\/([^/]{1,600})$/);
+      if(request.method==='GET'&&costDetail){const value=costDetail[1]==='requests'?await runtimeLedger.get('model_requests',decodeURIComponent(costDetail[2])):await runtimeLedger.rows('model_requests',{taskId:decodeURIComponent(costDetail[2])});return sendJson(response,value?200:404,value||{error:'记录不存在'});}
+      if(request.method==='POST'&&url.pathname==='/api/console/costs/budget')return sendJson(response,200,await runtimeLedger.budget(await readJson(request),actor));
+      if(request.method==='POST'&&url.pathname==='/api/console/costs/prices')return sendJson(response,200,await runtimeLedger.price(await readJson(request),actor));
+      if(request.method==='POST'&&url.pathname==='/api/console/costs/statements')return sendJson(response,200,await runtimeLedger.importStatement(await readJson(request,1048576),actor,{preview:query.preview==='true'}));
+      if(request.method==='GET'&&url.pathname==='/api/console/review-records')return sendJson(response,200,await reviewRecords.view(query));
+      if(request.method==='GET'&&url.pathname==='/api/console/operations')return sendJson(response,200,await management.list());
+      if(request.method==='POST'&&url.pathname==='/api/console/operations/preview')return sendJson(response,200,await management.preview(await readJson(request)));
+      if(request.method==='POST'&&url.pathname==='/api/console/operations/send')return sendJson(response,200,await management.execute(await readJson(request),actor));
+      if(request.method==='POST'&&url.pathname==='/api/console/operations/record')return sendJson(response,200,await management.record(await readJson(request),actor));
+      const operationCheck=url.pathname.match(/^\/api\/console\/operations\/([a-f0-9]{32})\/reconcile$/);
+      if(request.method==='POST'&&operationCheck)return sendJson(response,200,await management.reconcile(operationCheck[1],await readJson(request),actor));
       if (request.method === 'GET' && url.pathname === '/api/console') return sendJson(response, 200, await reviewConsole.view());
       const asset = url.pathname.match(/^\/api\/console\/assets\/([a-f0-9]{64})$/);
       if (request.method === 'GET' && asset) { const { bytes, mime } = await reviewConsole.asset(asset[1]); response.writeHead(200, { 'Content-Type': mime }); return response.end(bytes); }
@@ -121,6 +151,7 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 403, { error: '管理员仅查看羊羊的数据，不能代替她作答或自评。' });
     }
     const actor = { id: `web:${session.user}`, role: session.role };
+    if(request.method==='GET'&&url.pathname==='/api/calendar')return sendJson(response,200,await reviewRecords.view(Object.fromEntries(url.searchParams)));
     if (url.pathname.startsWith('/api/knowledge-v2/')) {
       const route = url.pathname.slice('/api/knowledge-v2'.length);
       if (request.method === 'GET' && route === '/photo-jobs') return sendJson(response, 200, await sourcePhotoService.list(actor, Object.fromEntries(url.searchParams)));
@@ -172,7 +203,7 @@ const server = createServer(async (request, response) => {
       if (session.role !== 'admin') return sendJson(response, 403, { error: '只有管理员可查看工作台。' });
       const domain = url.pathname.match(/^\/console\/(scheduler|date)\.js$/);
       if (domain) { response.writeHead(200, { 'Content-Type': mimeTypes['.js'] }); return response.end(await readFile(path.join(__dirname, 'domain', `${domain[1]}.js`))); }
-      return await serveStatic(response, url.pathname === '/console/' ? '/console/index.html' : url.pathname);
+      return await serveStatic(response, url.pathname === '/console/' ? '/console/index.html' : url.pathname === '/console/cost/' ? '/console/cost/index.html' : url.pathname);
     }
     await serveStatic(response, url.pathname === '/study' ? '/' : url.pathname);
   } catch (error) {
@@ -204,7 +235,7 @@ async function handleApi(request, response, url, actor) {
 
   if (request.method === 'POST' && url.pathname === '/api/reviews') {
     const body = await readJson(request);
-    const result = await studyService.recordReview(body);
+    const result = await studyService.recordReview({...body,actorId:actor.id});
     return sendJson(response, 201, result);
   }
 
@@ -212,7 +243,7 @@ async function handleApi(request, response, url, actor) {
     const body = await readJson(request);
     const session = body.practiceSessionId ? await studyService.practiceSession(body.practiceSessionId, actor.id, body.knowledgePointId) : null;
     const selectedTask = session?.task || await studyService.getPracticeTask(body.knowledgePointId);
-    const attempt = await studyService.saveAnswer({ knowledgePointId: body.knowledgePointId, content: body.content,
+    const attempt = await studyService.saveAnswer({ knowledgePointId: body.knowledgePointId, content: body.content,actorId:actor.id,
       sourceId: body.sourceId, practiceSessionId: session?.id, taskSnapshot: selectedTask });
     const task = attempt.taskSnapshot || selectedTask;
     const queued = await feedbackService.enqueue({

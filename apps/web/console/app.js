@@ -1,6 +1,7 @@
 import { todayKey } from './date.js';
 import { uploadRecords, uploadStrip, simulator, predictions, openUploadEditor } from './upload-workspace.js';
 import { scheduleReview } from './scheduler.js';
+import { mountManagementPage } from './management-pages.js';
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -20,8 +21,7 @@ const modeControls = () => '<a class="button" href="/study">背诵与自评 ↗<
 
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('#toast').classList.remove('visible'), 3500); }
 function heading() {
-  const [, eyebrow, title, subtitle] = titles[state.page];
-  return `<section class="page-heading"><div><p class="eyebrow">${eyebrow}</p><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions">${state.page === 'data' ? '' : modeControls()}</div></section>`;
+  return `<section class="page-heading"><div><h1>${titles[state.page][0]}</h1></div><div class="heading-actions">${state.page === 'data' ? '' : modeControls()}</div></section>`;
 }
 function banner() {return '<div class="source-banner"><strong>学习数据</strong><span>与飞书 Agent 共用；上传文字校正会保存并保留修订。</span><span>管理员 · 查看全部数据</span></div>';}
 
@@ -118,6 +118,11 @@ function pointDetail(id) {
 }
 function algorithm() { drawer('记忆计算 · 四档间隔算法 v1', '<p class="eyebrow">SPACED RECALL</p><h2>按这次回忆感受，<br>决定下一次见面的时间。</h2><p>沿用当前已实现的四档间隔算法。它不是 FSRS，旧状态的历史算法版本未记录。</p><table class="data-table"><thead><tr><th>回忆感受</th><th>首次间隔</th><th>已有间隔后</th></tr></thead><tbody><tr><td>没想起来</td><td>1 天</td><td>重置为 1 天</td></tr><tr><td>很吃力</td><td>1 天</td><td>原间隔 × 1.2</td></tr><tr><td>基本掌握</td><td>3 天</td><td>原间隔 × 2.5</td></tr><tr><td>很轻松</td><td>5 天</td><td>原间隔 × 3.8</td></tr></tbody></table><h3>上传与完成分开</h3><p>拍照说明这次内容来自羊羊。发现遗忘可以加入待回忆队列，但不能生成虚构的“已经背过”或历史自评。</p><p>未来日期按当前状态预测；完成背诵并自评后，新的间隔和日期会更新。</p>'); }
 function render() {
+  if(['operations','review-records'].includes(state.page)){
+    document.querySelectorAll('[data-page]').forEach(a=>a.classList.toggle('active',a.dataset.page===state.page));
+    $('#breadcrumb').textContent='工作台 / '+(state.page==='operations'?'管理操作':'复习记录');
+    mountManagementPage(state.page,{drawer,toast}).catch(e=>toast(e.message));return;
+  }
   document.querySelectorAll('[data-page]').forEach(a => { a.classList.toggle('active', a.dataset.page === state.page); a.setAttribute('aria-current', a.dataset.page === state.page ? 'page' : 'false'); });
   $('#breadcrumb').textContent = `工作台 / ${titles[state.page][0]}`;
   $('#main').innerHTML = ({ calendar, memory, identity, data: dataPage })[state.page]();
@@ -177,7 +182,7 @@ document.addEventListener('input', event => {
   const cursor = event.target.selectionStart;
   render(); $('#memory-search').focus(); $('#memory-search').setSelectionRange(cursor, cursor);
 });
-function route() { const page = location.hash.slice(1); state.page = titles[page] ? page : 'calendar'; state.offset = 0; render(); window.scrollTo(0, 0); }
+function route() { const page = location.hash.slice(1); state.page = titles[page]||['operations','review-records'].includes(page) ? page : 'calendar'; state.offset = 0; render(); window.scrollTo(0, 0); }
 window.addEventListener('hashchange', route);
 try {
   const response = await fetch('/api/console');

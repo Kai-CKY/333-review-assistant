@@ -51,7 +51,7 @@ jobs:
           333-review-assistant:ci node scripts/smoke-deployment.mjs
 
       - name: Publish verified image for SSH deployment
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/codex/review-console-relational' || github.ref == 'refs/heads/main')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/codex/unified-management-20261006' || github.ref == 'refs/heads/codex/review-console-relational' || github.ref == 'refs/heads/main')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

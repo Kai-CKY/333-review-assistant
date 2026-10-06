@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10263d">
+  <title>用量与费用 · 333 管理工作台</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到费用内容</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#overview"><span class="brand-mark">333<span>↗</span></span><span>记忆工作台<small>MEMORY STUDIO</small></span></a>
+      <div class="workspace"><span class="avatar">羊</span><div><strong>羊羊的学习空间</strong><small>一名学习者 · 一个管理者</small></div></div>
+      <p class="nav-caption">管理工作台</p>
+      <nav aria-label="管理导航">
+        <span class="nav-item muted-nav"><span class="nav-icon">▦</span>学习与复习</span>
+        <span class="nav-item muted-nav"><span class="nav-icon">▤</span>Agent 记忆</span>
+        <span class="nav-item muted-nav"><span class="nav-icon">◎</span>人员与身份</span>
+        <a class="nav-item active" href="#overview" aria-current="page"><span class="nav-icon">◷</span>用量与费用<span class="new-label">NEW</span></a>
+      </nav>
+      <div class="admin"><span class="avatar admin-avatar">管</span><div><strong>管理者 · 老大</strong><small>全部数据查看权限</small></div><span class="admin-dot"></span></div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar"><span>工作台 <span class="breadcrumb-divider">/</span> 用量与费用</span><div><span class="preview-indicator">本地前端样板</span><span class="topbar-date">2026 年 10 月 6 日 · 北京时间</span></div></header>
+      <main id="main" tabindex="-1">
+        <div class="page-heading"><div><h1>用量与费用</h1></div><button class="button" id="edit-budget"><span aria-hidden="true">⚙</span> 参考预算</button></div>
+        <div class="demo-banner"><span class="demo-label">样例数据</span><span>以下金额、请求、Key 和账单均为演示。预算修改仅在本页生效。</span></div>
+        <div class="view-toolbar">
+          <nav class="tabs" aria-label="费用视图"><a href="#overview" data-view="overview">费用概览</a><a href="#requests" data-view="requests">调用明细</a><a href="#reconciliation" data-view="reconciliation">官方对账</a></nav>
+          <div class="scope-controls"><label class="sr-only" for="environment">环境</label><select id="environment"><option value="prod">正式环境</option><option value="test">测试环境</option><option value="dev">本地验证</option><option value="all">全部环境</option></select><div class="segmented" role="group" aria-label="统计时间"><button data-period="today" aria-pressed="false">今天</button><button data-period="week" aria-pressed="false">近 7 天</button><button data-period="month" aria-pressed="true" class="active">本月</button></div></div>
+        </div>
+        <div id="budget-alert" aria-live="polite"></div>
+        <section id="metrics" class="metrics" aria-label="用量概览"></section>
+        <div id="overview-view" class="view">
+          <div class="overview-grid">
+            <section class="panel trend-panel"><div class="panel-heading"><div><h2>每日费用</h2></div><span id="trend-range" class="subtle"></span></div><div class="chart-legend"><span><i class="dot blue"></i>已观测模型费用估算</span><span class="subtle">点击日期查看任务</span></div><div id="trend-chart"></div><div id="chart-days" class="chart-days" aria-label="按日查看任务"></div></section>
+            <section class="panel purpose-panel"><div class="panel-heading"><div><h2>业务费用</h2></div></div><div id="purpose-breakdown"></div><p class="panel-footnote">按业务任务汇总，重试也计入原任务。</p></section>
+          </div>
+          <div class="lower-grid">
+            <section class="panel expensive-panel"><div class="panel-heading"><div><h2 id="top-task-heading">费用较高的任务</h2></div><button class="text-button" id="show-all">查看全部 <span aria-hidden="true">↗</span></button></div><div id="top-tasks"></div><div class="panel-footnote" id="task-scope-note"></div></section>
+            <section class="panel budget-panel"><div class="panel-heading"><div><h2>参考预算</h2></div><span class="badge green">仅告警</span></div><div id="budget-summary"></div><div class="budget-policy"><span class="policy-check">✓</span><p><strong>超出预算后继续调用</strong></p></div><button class="text-button budget-edit" id="edit-budget-secondary">调整参考金额 <span aria-hidden="true">↗</span></button></section>
+          </div>
+          <div class="accounting-note"><span aria-hidden="true">ⓘ</span><p>估算费用只包含已观测的模型用量。未返回用量的请求与待核对的联网工具费用单列；最终扣款以官方账单为准。</p></div>
+        </div>
+        <div id="requests-view" class="view" hidden>
+          <section class="panel requests-panel"><div class="panel-heading"><div><h2>调用明细</h2></div><button class="button small" id="export-csv">导出样例明细 ↓</button></div>
+            <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="request-search" type="search" placeholder="搜索任务、请求 ID 或 Key" aria-label="搜索任务、请求 ID 或 Key"></label><label><span class="sr-only">业务用途</span><select id="purpose-filter"><option value="all">全部用途</option><option value="photo">图片整理</option><option value="feedback">答题反馈</option><option value="chat">日常对话</option><option value="engineering">工程验证</option></select></label><label><span class="sr-only">用量状态</span><select id="status-filter"><option value="all">全部用量状态</option><option value="known">已观测完整</option><option value="unknown">用量未知</option></select></label><button class="text-button" id="reset-filters">重置</button></div>
+            <div class="table-scroll"><table><thead><tr><th>时间 / 请求</th><th>任务与步骤</th><th>环境 / Key</th><th>输入 / 输出 token</th><th>模型费用估算</th><th>结果</th><th><span class="sr-only">详情</span></th></tr></thead><tbody id="request-rows"></tbody></table></div><div id="request-pagination" class="table-footer"></div>
+          </section><p class="view-note">筛选只改变明细列表。顶部概览按所选环境与时间统计，失败请求的已知用量也会计入。</p>
+        </div>
+        <div id="reconciliation-view" class="view" hidden>
+          <section class="panel reconciliation-panel"><div class="panel-heading"><div><h2>官方对账</h2></div><div class="reconcile-actions"><button class="button small" id="clear-statement" hidden>清除样例</button><button class="button primary" id="load-statement">载入对账样例</button></div></div><div id="statement-content"></div></section>
+          <section class="panel key-panel"><div class="panel-heading"><div><p class="section-eyebrow">费用归属</p><h2>Key 与环境</h2></div><span class="badge">演示标识</span></div><div class="table-scroll"><table><thead><tr><th>Key 别名</th><th>环境</th><th>资源 ID</th><th>关联状态</th></tr></thead><tbody><tr><td><strong>333-prod</strong></td><td>正式环境</td><td class="mono">demo-key-prod-01</td><td><span class="badge green">已关联</span></td></tr><tr><td><strong>333-staging</strong></td><td>测试环境</td><td class="mono">demo-key-test-01</td><td><span class="badge green">已关联</span></td></tr><tr><td><strong>333-local</strong></td><td>本地验证</td><td class="mono">demo-key-local-01</td><td><span class="badge green">已关联</span></td></tr></tbody></table></div><p class="panel-footnote">这里展示资源标识，不展示密钥。样例使用三个独立 Key，不代表线上已完成拆分。</p></section>
+        </div>
+        <footer><span>333 · 羊羊的记忆工作台</span><span>管理者视图 · 所有数据均为本地样例</span></footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="detail-dialog" class="detail-dialog"><div class="drawer-header"><div><p class="section-eyebrow">费用明细</p><h2 id="detail-title"></h2></div><button class="icon-button" id="close-detail" aria-label="关闭详情">×</button></div><div id="detail-content"></div></dialog>
+  <dialog id="budget-dialog" class="budget-dialog"><form id="budget-form"><div class="drawer-header"><div><p class="section-eyebrow">样板设置</p><h2>调整参考预算</h2></div><button type="button" class="icon-button" id="close-budget" aria-label="关闭预算设置">×</button></div><p class="budget-description">用于正式环境的费用提醒。超出金额后，模型继续调用。</p><label class="form-label" for="monthly-budget">每月参考预算（元）</label><input id="monthly-budget" type="number" min="0.01" max="1000000" step="0.01" required><label class="form-label" for="daily-budget">每日参考预算（元）</label><input id="daily-budget" type="number" min="0.01" max="1000000" step="0.01" required><div class="form-policy"><span class="badge green">已选择</span><strong>只显示告警，继续调用</strong></div><p class="subtle">80% 提示接近预算，100% 提示超额。修改只在这个 demo 页面内生效，刷新后恢复样例。</p><div class="form-actions"><button type="button" class="button" id="cancel-budget">取消</button><button type="submit" class="button primary">应用到样板</button></div></form></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
