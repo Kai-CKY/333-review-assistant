@@ -1,9 +1,20 @@
+import { randomInt } from 'node:crypto';
 import { todayKey } from '../domain/date.js';
 import { activeStudyPoints } from '../knowledge/library.js';
 
+export function sampleDailyReview(data, day, pickIndex = randomInt) {
+  const dueIds = new Set(data.reviewStates.filter(s => s.nextReviewOn <= day).map(s => s.knowledgePointId));
+  const candidates = activeStudyPoints(data).filter(p => dueIds.has(p.id));
+  const selected = [];
+  while (selected.length < 5 && candidates.length) {
+    selected.push(candidates.splice(pickIndex(candidates.length), 1)[0]);
+  }
+  return selected;
+}
+
 /** Once per Beijing calendar day. Sending never records a review or changes its date. */
 export class ReviewReminders {
-  constructor({repository,send,chatId,learnerId,now=()=>new Date(),logger=console}) {Object.assign(this,{repository,send,chatId,learnerId,now,logger});this.running=false;}
+  constructor({repository,send,chatId,learnerId,now=()=>new Date(),logger=console,pickIndex=randomInt}) {Object.assign(this,{repository,send,chatId,learnerId,now,logger,pickIndex});this.running=false;}
   async tick() {
     if(this.running||!this.chatId||!this.learnerId)return;
     this.running=true;
@@ -16,15 +27,16 @@ export class ReviewReminders {
         if(!setting.enabled||setting.time!==time)return null;
         data.reminderDeliveries??={};
         if(data.reminderDeliveries[day])return null;
-        const eligible=new Set(activeStudyPoints(data).map(p=>p.id)),due=data.reviewStates.filter(s=>eligible.has(s.knowledgePointId)&&s.nextReviewOn<=day);
-        if(!due.length)return null;
-        const record={day,status:'sending',claimedAt:now.toISOString(),knowledgePointIds:due.map(s=>s.knowledgePointId)};
+        const selected=sampleDailyReview(data,day,this.pickIndex);
+        if(!selected.length)return null;
+        const record={day,status:'sending',claimedAt:now.toISOString(),selectionMode:'random_due',knowledgePointIds:selected.map(p=>p.id),titles:selected.map(p=>p.title)};
         data.reminderDeliveries[day]=record;
         return record;
       });
       if(!notice)return;
       try {
-        const sent=await this.send(this.chatId,{text:`羊羊，今天有 ${notice.knowledgePointIds.length} 个知识点到期或需要补复习。先合上资料试着回忆，再背诵；完成后按真实感受自评。可以发送“今天复习什么”查看安排。`});
+        const topics=notice.titles.map((title,index)=>`${index+1}. ${String(title).replace(/[\r\n]+/g,' ').slice(0,180)}`).join('\n');
+        const sent=await this.send(this.chatId,{text:`羊羊，今天随机抽查 ${notice.knowledgePointIds.length} 个知识点：\n${topics}\n\n先合上资料，逐个回忆关键要点，再对照笔记查漏补缺；复习后按真实感受自评。今天先完成这几个就好。`});
         await this.repository.mutate(data=>Object.assign(data.reminderDeliveries[day],{status:'sent',sentAt:this.now().toISOString(),messageId:sent?.messageId||null}));
       }catch(error) {
         // Retain ambiguous failures to avoid a duplicate if Feishu accepted the send.
