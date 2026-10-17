@@ -1,6 +1,6 @@
 import { ArkFeedbackProvider } from './ark/feedback.js';
 
-export const STRUCTURE_FEEDBACK_PROMPT_VERSION = 'structure-feedback-v1';
+export const STRUCTURE_FEEDBACK_PROMPT_VERSION = 'structure-feedback-v2';
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';

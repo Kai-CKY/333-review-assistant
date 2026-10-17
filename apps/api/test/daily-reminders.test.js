@@ -44,7 +44,7 @@ test('message lists only the persisted five topics and restart does not resample
   const record=structuredClone(data.reminderDeliveries['2026-10-16']);
   assert.equal(record.status,'sent');assert.equal(record.selectionMode,'random_due');
   assert.equal(record.knowledgePointIds.length,5);assert.equal(sent.length,1);
-  assert.match(sent[0].text,/今天随机抽查 5 个/);
+  assert.equal(sent[0].text.split('\n').filter(line=>/^\d+\. /.test(line)).length,5);
   for(const title of record.titles)assert.ok(sent[0].text.includes(title));
   assert.ok(!sent[0].text.includes('65 个'));assert.ok(!sent[0].text.includes('今天复习什么'));
   await new ReviewReminders({...config,pickIndex:()=>{throw new Error('must not resample');}}).tick();

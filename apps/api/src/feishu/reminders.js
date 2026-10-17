@@ -36,7 +36,7 @@ export class ReviewReminders {
       if(!notice)return;
       try {
         const topics=notice.titles.map((title,index)=>`${index+1}. ${String(title).replace(/[\r\n]+/g,' ').slice(0,180)}`).join('\n');
-        const sent=await this.send(this.chatId,{text:`羊羊，今天随机抽查 ${notice.knowledgePointIds.length} 个知识点：\n${topics}\n\n先合上资料，逐个回忆关键要点，再对照笔记查漏补缺；复习后按真实感受自评。今天先完成这几个就好。`});
+        const sent=await this.send(this.chatId,{text:`羊羊，今天抽到这 ${notice.knowledgePointIds.length} 个知识点：\n${topics}\n\n先合上资料，从最有印象的一题说起。想不全也没关系，先说关键词就好；复习后再按真实感受自评。`});
         await this.repository.mutate(data=>Object.assign(data.reminderDeliveries[day],{status:'sent',sentAt:this.now().toISOString(),messageId:sent?.messageId||null}));
       }catch(error) {
         // Retain ambiguous failures to avoid a duplicate if Feishu accepted the send.
