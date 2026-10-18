@@ -1,10 +1,12 @@
 import { randomInt } from 'node:crypto';
-import { todayKey } from '../domain/date.js';
+import { addDays, todayKey } from '../domain/date.js';
 import { activeStudyPoints } from '../knowledge/library.js';
 
 export function sampleDailyReview(data, day, pickIndex = randomInt) {
   const dueIds = new Set(data.reviewStates.filter(s => s.nextReviewOn <= day).map(s => s.knowledgePointId));
-  const candidates = activeStudyPoints(data).filter(p => dueIds.has(p.id));
+  // Keep claimed selections too: an uncertain send may already have reached Feishu.
+  const recentIds = new Set([1, 2].flatMap(offset => data.reminderDeliveries?.[addDays(day, -offset)]?.knowledgePointIds ?? []));
+  const candidates = activeStudyPoints(data).filter(p => dueIds.has(p.id) && !recentIds.has(p.id));
   const selected = [];
   while (selected.length < 5 && candidates.length) {
     selected.push(candidates.splice(pickIndex(candidates.length), 1)[0]);
